@@ -48,7 +48,6 @@ def create_classifier(name: str, **kwargs: Dict[str, Any]):
     """
     Get a classifier by name.
     """
-    name = name.lower()
 
     if name == "LogisticRegression":
         return LogisticRegression(**kwargs)

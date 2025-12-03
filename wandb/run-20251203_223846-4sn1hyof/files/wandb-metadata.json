@@ -1,0 +1,28 @@
+{
+  "os":  "Windows-11-10.0.22631-SP0",
+  "python":  "CPython 3.12.0",
+  "startedAt":  "2025-12-03T21:38:46.137683Z",
+  "program":  "C:\\Users\\xavipba\\OneDrive\\Escritorio\\Msc Computer vision\\C3 Projects\\project-2\\Week1\\main.py",
+  "codePath":  "Week1\\main.py",
+  "codePathLocal":  "Week1\\main.py",
+  "git":  {
+    "remote":  "https://github.com/MCV-C3/project-2.git",
+    "commit":  "4a26373197f73e02f872037d0391b396e7ef8a95"
+  },
+  "email":  "xavipba@gmail.com",
+  "root":  "C:\\Users\\xavipba\\OneDrive\\Escritorio\\Msc Computer vision\\C3 Projects\\project-2",
+  "host":  "XaviGaming",
+  "executable":  "C:\\Users\\xavipba\\OneDrive\\Escritorio\\Msc Computer vision\\C3 Projects\\project-2\\team2\\Scripts\\python.exe",
+  "cpu_count":  14,
+  "cpu_count_logical":  20,
+  "disk":  {
+    "/":  {
+      "total":  "999250980864",
+      "used":  "460237672448"
+    }
+  },
+  "memory":  {
+    "total":  "34163785728"
+  },
+  "writerId":  "iyz5l46lbhydyyfjvi4uc6g4p74kdx5p"
+}

@@ -3,3 +3,5 @@ opencv-contrib-python
 scikit-learn
 matplotlib
 tqdm
+wandb>=0.17
+
