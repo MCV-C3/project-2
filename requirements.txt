@@ -1,0 +1,5 @@
+opencv-python
+opencv-contrib-python
+scikit-learn
+matplotlib
+tqdm
