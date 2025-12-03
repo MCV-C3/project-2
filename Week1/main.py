@@ -13,6 +13,7 @@ from sklearn.metrics import accuracy_score
 from classifiers import create_classifier
 from bovw import BOVW
 from utils import compute_hash
+from parameters import SELECTED_CLASSIFIER, CLASSIFIER_PARAMETERS,CODEBOOK_SIZE, SELECTED_DETECTOR, DETECTOR_PARAMETERS
 
 root = Path.cwd() / "Week1"
 
@@ -143,9 +144,8 @@ if __name__ == "__main__":
     data_train = Dataset(ImageFolder="./data/MIT_split/train")
     data_test = Dataset(ImageFolder="./data/MIT_split/test") 
 
-    bovw = BOVW() # default AKAZE
-    classifier_kwargs = {"C" : 0.1}
+    bovw = BOVW(detector_type=SELECTED_DETECTOR,codebook_size=CODEBOOK_SIZE, detector_kwargs=DETECTOR_PARAMETERS[SELECTED_DETECTOR]) # default AKAZE
     bovw, classifier = train(dataset=data_train, bovw=bovw,
-                             classifier_name="hist", 
-                             classifier_kwargs = classifier_kwargs)
+                             classifier_name=SELECTED_CLASSIFIER, 
+                             classifier_kwargs = CLASSIFIER_PARAMETERS[SELECTED_CLASSIFIER])
     test(dataset=data_test, bovw=bovw, classifier=classifier)

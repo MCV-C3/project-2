@@ -50,16 +50,13 @@ def create_classifier(name: str, **kwargs: Dict[str, Any]):
     """
     name = name.lower()
 
-    if name == "logreg":
-        return LogisticRegression(class_weight="balanced", max_iter=1000, **kwargs)
+    if name == "LogisticRegression":
+        return LogisticRegression(**kwargs)
 
-    if name == "linear":
-        return SVC(kernel="linear", **kwargs)
+    if name == "SVM":
+        return SVC(**kwargs)
 
-    if name == "rbf":
-        return SVC(kernel="rbf", **kwargs)
-
-    if name == "hist":
+    if name == "HistIntersectionSVM":
         return HistIntersectionSVM(**kwargs)
 
     raise ValueError("Unknown classifier name: "
