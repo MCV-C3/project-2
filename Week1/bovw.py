@@ -11,15 +11,15 @@ from typing import *
 class BOVW():
     
     def __init__(self, detector_type="AKAZE", codebook_size:int=50, detector_kwargs:dict={}, codebook_kwargs:dict={}):
-
-        if detector_type == 'SIFT':
+        self.detector_type = detector_type
+        if self.detector_type == 'SIFT':
             self.detector = cv2.SIFT_create(**detector_kwargs)
-        elif detector_type == 'AKAZE':
+        elif self.detector_type == 'AKAZE':
             self.detector = cv2.AKAZE_create(**detector_kwargs)
-        elif detector_type == 'ORB':
+        elif self.detector_type == 'ORB':
             self.detector = cv2.ORB_create(**detector_kwargs)
         else:
-            raise ValueError("Detector type must be 'SIFT', 'SURF', or 'ORB'")
+            raise ValueError("Detector type must be 'SIFT', 'AKAZE', or 'ORB'")
         
         self.codebook_size = codebook_size
         self.codebook_algo = MiniBatchKMeans(n_clusters=self.codebook_size, **codebook_kwargs)
