@@ -9,6 +9,7 @@ from typing import *
 from PIL import Image
 import tqdm
 from sklearn.metrics import accuracy_score
+from sklearn.model_selection import KFold
 
 from parameters import (
     CLASSIFIER_PARAMETERS, CODEBOOK_SIZE,
@@ -225,7 +226,7 @@ def extract_test_accuracy(bovw, classifier, dataset):
     acc = accuracy_score(labels, preds)
     return acc
 
-def gridsearch(train_data, test_data):
+def gridsearch(train_data, test_data, n_folds=5):
     """
     Full grid search over:
     - classifier types
@@ -233,7 +234,13 @@ def gridsearch(train_data, test_data):
     - codebook sizes
     - spatial pyramid configurations
     - dense SIFT configurations
+    Uses k-fold cross-validation on the training data.
     And logs everything to W&B.
+
+    Args:
+        train_data: Training dataset
+        test_data: Test dataset for final evaluation
+        n_folds: Number of folds for cross-validation (default: 5)
     """
 
     best_acc = -1
@@ -292,11 +299,59 @@ def gridsearch(train_data, test_data):
                                             "dense_scales": dense_scales,
                                             "spatial_pyramid": str(spatial_pyramid_type),
                                             "pyramid_levels": int(pyramid_level),
+                                            "n_folds": n_folds,
                                         }
                                     )
 
-                                    # Build BoVW
-                                    bovw = BOVW(
+                                    # Perform k-fold cross-validation
+                                    kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
+                                    fold_accuracies = []
+
+                                    for fold_idx, (train_idx, val_idx) in enumerate(kf.split(train_data)):
+                                        print(f"\n  Fold {fold_idx + 1}/{n_folds}")
+
+                                        # Split data into train and validation folds
+                                        fold_train = [train_data[i] for i in train_idx]
+                                        fold_val = [train_data[i] for i in val_idx]
+
+                                        # Build BoVW for this fold
+                                        bovw = BOVW(
+                                            detector_type=SELECTED_DETECTOR,
+                                            codebook_size=int(codebook_size),
+                                            detector_kwargs=DETECTOR_PARAMETERS[SELECTED_DETECTOR],
+                                            spatial_pyramid=spatial_pyramid_type,
+                                            pyramid_levels=int(pyramid_level),
+                                            dense_sift=bool(use_dense),
+                                            dense_step=int(dense_step),
+                                            dense_scales=dense_scales
+                                        )
+
+                                        # Train on fold
+                                        bovw, classifier = train(
+                                            dataset=fold_train,
+                                            bovw=bovw,
+                                            classifier_name=classifier_name,
+                                            classifier_kwargs=clf_params,
+                                        )
+
+                                        # Evaluate on validation fold
+                                        fold_acc = extract_test_accuracy(bovw, classifier, fold_val)
+                                        fold_accuracies.append(fold_acc)
+                                        print(f"  Fold {fold_idx + 1} validation accuracy: {fold_acc:.4f}")
+
+                                        wandb.log({
+                                            f"fold_{fold_idx + 1}_val_accuracy": fold_acc
+                                        })
+
+                                    # Calculate mean CV accuracy
+                                    mean_cv_acc = np.mean(fold_accuracies)
+                                    std_cv_acc = np.std(fold_accuracies)
+
+                                    print(f"\nCross-validation accuracy: {mean_cv_acc:.4f} (+/- {std_cv_acc:.4f})")
+
+                                    # Train on full training set and evaluate on test set
+                                    print("\nTraining on full training set...")
+                                    bovw_final = BOVW(
                                         detector_type=SELECTED_DETECTOR,
                                         codebook_size=int(codebook_size),
                                         detector_kwargs=DETECTOR_PARAMETERS[SELECTED_DETECTOR],
@@ -307,18 +362,26 @@ def gridsearch(train_data, test_data):
                                         dense_scales=dense_scales
                                     )
 
-                                    bovw, classifier = train(
+                                    bovw_final, classifier_final = train(
                                         dataset=train_data,
-                                        bovw=bovw,
+                                        bovw=bovw_final,
                                         classifier_name=classifier_name,
                                         classifier_kwargs=clf_params,
                                     )
 
-                                    acc = extract_test_accuracy(bovw, classifier, test_data)
-                                    wandb.log({"accuracy": acc})
+                                    test_acc = extract_test_accuracy(bovw_final, classifier_final, test_data)
 
-                                    if acc > best_acc:
-                                        best_acc = acc
+                                    wandb.log({
+                                        "mean_cv_accuracy": mean_cv_acc,
+                                        "std_cv_accuracy": std_cv_acc,
+                                        "test_accuracy": test_acc
+                                    })
+
+                                    print(f"Test set accuracy: {test_acc:.4f}")
+
+                                    # Track best based on CV accuracy
+                                    if mean_cv_acc > best_acc:
+                                        best_acc = mean_cv_acc
                                         best_config = {
                                             "classifier": classifier_name,
                                             "codebook_size": codebook_size,
@@ -328,7 +391,9 @@ def gridsearch(train_data, test_data):
                                             "spatial_pyramid": spatial_pyramid_type,
                                             "pyramid_levels": pyramid_level,
                                             "params": clf_params,
-                                            "accuracy": acc
+                                            "cv_accuracy": mean_cv_acc,
+                                            "cv_std": std_cv_acc,
+                                            "test_accuracy": test_acc
                                         }
 
                                     wandb.finish()
