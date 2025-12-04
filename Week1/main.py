@@ -36,8 +36,8 @@ def Dataset(ImageFolder:str = "data/MIT_split/train") -> List[Tuple[Type[Image.I
 
 
 if __name__ == "__main__":
-    data_train = Dataset(ImageFolder="./data/MIT_split/train")
-    data_test = Dataset(ImageFolder="./data/MIT_split/test") 
+    data_train = Dataset(ImageFolder="../places_reduced/train")
+    data_test = Dataset(ImageFolder="../places_reduced/val") 
 
     best_config = gridsearch(data_train,data_test)
     
