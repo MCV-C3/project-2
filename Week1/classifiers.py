@@ -59,4 +59,4 @@ def create_classifier(name: str, **kwargs: Dict[str, Any]):
         return HistIntersectionSVM(**kwargs)
 
     raise ValueError("Unknown classifier name: "
-                     f"{name}. Should be 'logreg', 'linear', 'rbf' or 'hist'.")
+                     f"{name}. Should be 'LogisticRegression', 'SVM' or 'HistIntersectionSVM'.")

@@ -10,17 +10,17 @@ CLASSIFIER_PARAMETERS = {
     },
 
     "SVM": {
-        "kernel": ["linear"],
+        "kernel": ["linear", "rbf"],
         "C": [0.01, 0.1, 1.0],
         "class_weight": ["balanced"]
     },
 
     "HistIntersectionSVM": {
-        "C": np.linspace(0.001, 1.0, 50)
+        "C": [0.01, 0.1, 1.0]
     }
 }
 
-SELECTED_CLASSIFIER = ["LogisticRegression"] # Selected Classifier
+SELECTED_CLASSIFIER = ["LogisticRegression"] #, "SVM", "HistIntersectionSVM"] # Selected Classifier
 
 
 # Detector parameters
@@ -35,7 +35,7 @@ DETECTOR_PARAMETERS = {
     "ORB": {
     }
 }
-SELECTED_DETECTOR = "SIFT"
+SELECTED_DETECTOR = "AKAZE"
 
 
 # Codebook parameters

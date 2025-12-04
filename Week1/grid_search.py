@@ -9,6 +9,7 @@ from typing import *
 from PIL import Image
 import tqdm
 from sklearn.metrics import accuracy_score
+from sklearn.model_selection import cross_val_score
 
 from parameters import (
     CLASSIFIER_PARAMETERS, CODEBOOK_SIZE,
@@ -43,6 +44,24 @@ def load_cache(dataset, bovw):
         return all_descriptors, all_labels
     else:
         return None
+    
+def cross_validation(classifier: Type[object], X, Y, cv=5):
+    """
+    Performs cross-validation and prints results.
+    """
+
+    print(f"--- Performing {cv}-Fold Cross-Validation ---")
+    scores = cross_val_score(classifier, X, Y, cv=cv, scoring='accuracy')
+
+    print(f"CV Scores: {scores}")
+    print(f"Mean Accuracy: {scores.mean():.4f}")
+    print("----------------------------------------------------")
+
+    if wandb.run is not None:
+        wandb.log({"cv_mean_accuracy": scores.mean()})
+
+    return scores.mean()
+
 
 def test(dataset: List[Tuple[Type[Image.Image], int]], 
          bovw: Type[BOVW], 
@@ -109,10 +128,12 @@ def train(dataset: List[Tuple[Image.Image, int]],
     classifier = create_classifier(classifier_name, **classifier_kwargs)
 
     print("Fitting the classifier")
+    cross_validation(classifier, bovw_histograms, all_labels)
     classifier.fit(bovw_histograms, all_labels)
 
-    print("Accuracy on Phase[Train]:", accuracy_score(y_true=all_labels, y_pred=classifier.predict(bovw_histograms)))
-    
+    train_accuracy = accuracy_score(y_true=all_labels, y_pred=classifier.predict(bovw_histograms))
+    print("Accuracy on Phase[Train]:", train_accuracy)
+    wandb.log({"Train Accuracy": train_accuracy})
     return bovw, classifier
 
 
@@ -194,7 +215,7 @@ def gridsearch(train_data, test_data):
                 )
 
                 acc = extract_test_accuracy(bovw, classifier, test_data)
-                wandb.log({"accuracy": acc})
+                wandb.log({"Test Accuracy": acc})
 
                 if acc > best_acc:
                     best_acc = acc

@@ -5,7 +5,7 @@ import glob
 from grid_search import gridsearch
 
 
-def Dataset(ImageFolder:str = "data/MIT_split/train") -> List[Tuple[Type[Image.Image], int]]:
+def Dataset(ImageFolder:str = "data/places_reduced/train") -> List[Tuple[Type[Image.Image], int]]:
 
     """
     Expected Structure:
@@ -36,8 +36,8 @@ def Dataset(ImageFolder:str = "data/MIT_split/train") -> List[Tuple[Type[Image.I
 
 
 if __name__ == "__main__":
-    data_train = Dataset(ImageFolder="./data/MIT_split/train")
-    data_test = Dataset(ImageFolder="./data/MIT_split/test") 
+    data_train = Dataset(ImageFolder="./data/places_reduced/train")
+    data_test = Dataset(ImageFolder="./data/places_reduced/val") 
 
     best_config = gridsearch(data_train,data_test)
     
