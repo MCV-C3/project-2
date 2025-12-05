@@ -10,9 +10,60 @@ from PIL import Image
 import tqdm
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import KFold
+import cv2
 
 import importlib
 import sys
+
+
+def keypoints_to_serializable(keypoints_list):
+    """Convert list of cv2.KeyPoint lists to serializable format."""
+    if keypoints_list is None:
+        return None
+
+    serializable = []
+    for keypoints in keypoints_list:
+        if keypoints is None:
+            serializable.append(None)
+        else:
+            kp_data = []
+            for kp in keypoints:
+                kp_data.append({
+                    'pt': kp.pt,  # (x, y)
+                    'size': kp.size,
+                    'angle': kp.angle,
+                    'response': kp.response,
+                    'octave': kp.octave,
+                    'class_id': kp.class_id
+                })
+            serializable.append(kp_data)
+    return serializable
+
+
+def serializable_to_keypoints(serializable_list):
+    """Convert serializable format back to cv2.KeyPoint objects."""
+    if serializable_list is None:
+        return None
+
+    keypoints_list = []
+    for kp_data_list in serializable_list:
+        if kp_data_list is None:
+            keypoints_list.append(None)
+        else:
+            keypoints = []
+            for kp_data in kp_data_list:
+                kp = cv2.KeyPoint(
+                    x=kp_data['pt'][0],
+                    y=kp_data['pt'][1],
+                    size=kp_data['size'],
+                    angle=kp_data['angle'],
+                    response=kp_data['response'],
+                    octave=kp_data['octave'],
+                    class_id=kp_data['class_id']
+                )
+                keypoints.append(kp)
+            keypoints_list.append(keypoints)
+    return keypoints_list
 
 # Allow specifying which parameters file to use
 PARAMS_MODULE = sys.modules.get('__params__', None)
@@ -105,7 +156,9 @@ def load_cache(dataset, bovw):
             else:
                 all_descriptors = data['descriptors']
                 all_labels = data['labels']
-                all_keypoints = data.get('keypoints', None)
+                serialized_keypoints = data.get('keypoints', None)
+                # Convert from serializable format back to cv2.KeyPoint objects
+                all_keypoints = serializable_to_keypoints(serialized_keypoints)
             return all_descriptors, all_labels, all_keypoints
         except (EOFError, pickle.UnpicklingError, Exception) as e:
             # Corrupted cache file, delete it and return None
@@ -190,12 +243,12 @@ def train(dataset: List[Tuple[Image.Image, int]],
 
         os.makedirs(root / "cache", exist_ok=True)
         cache_file = _get_cache_file(dataset, bovw)
-        # Don't cache keypoints - cv2.KeyPoint objects are not picklable
-        # They're only used for spatial pyramids and need to be recomputed anyway
+        # Convert keypoints to serializable format before caching
+        serialized_keypoints = keypoints_to_serializable(all_keypoints)
         cache_data = {
             'descriptors': all_descriptors,
             'labels': all_labels,
-            'keypoints': None  # Don't cache keypoints
+            'keypoints': serialized_keypoints  # Cache serialized keypoints
         }
         with open(cache_file, "wb") as f:
             pickle.dump(cache_data, f)
