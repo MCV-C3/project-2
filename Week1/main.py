@@ -1,4 +1,5 @@
 import os
+import argparse
 from typing import *
 from PIL import Image
 import glob
@@ -19,7 +20,7 @@ def Dataset(ImageFolder:str = "data/MIT_split/train") -> List[Tuple[Type[Image.I
         ImageFolder/cat/123.png
         ImageFolder/cat/nsdf3.png
         ImageFolder/cat/[...]/asd932_.png
-    
+
     """
 
     map_classes = {clsi: idx for idx, clsi  in enumerate(os.listdir(ImageFolder))}
@@ -36,14 +37,42 @@ def Dataset(ImageFolder:str = "data/MIT_split/train") -> List[Tuple[Type[Image.I
 
 
 if __name__ == "__main__":
-    data_train = Dataset(ImageFolder="../places_reduced/train")
-    data_test = Dataset(ImageFolder="../places_reduced/val")
+    parser = argparse.ArgumentParser(description='Run BoVW grid search experiments')
+    parser.add_argument('--run', type=str, default=None,
+                        help='Comma-separated list of configuration indices to run (e.g., "0,2,3" or "1-4")')
+    parser.add_argument('--count-configs', action='store_true',
+                        help='Count total number of configurations and exit')
+    parser.add_argument('--n-folds', type=int, default=5,
+                        help='Number of cross-validation folds (default: 5)')
 
-    # Run grid search with k-fold cross-validation (default: 5 folds)
-    best_config = gridsearch(data_train, data_test, n_folds=5)
+    args = parser.parse_args()
 
-    print("BEST CONFIGURATION FOUND ACROSS ALL CLASSIFIERS:")
-    print(best_config)
+    # Parse configuration indices if provided
+    config_indices = None
+    if args.run:
+        config_indices = []
+        for part in args.run.split(','):
+            if '-' in part:
+                start, end = map(int, part.split('-'))
+                config_indices.extend(range(start, end + 1))
+            else:
+                config_indices.append(int(part))
+
+    data_train = Dataset(ImageFolder="./places_reduced/train")
+    data_test = Dataset(ImageFolder="./places_reduced/val")
+
+    # Run grid search with k-fold cross-validation
+    best_config = gridsearch(
+        data_train,
+        data_test,
+        n_folds=args.n_folds,
+        config_indices=config_indices,
+        count_only=args.count_configs
+    )
+
+    if not args.count_configs:
+        print("\nBEST CONFIGURATION FOUND:")
+        print(best_config)
 
 
 

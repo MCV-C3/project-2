@@ -226,9 +226,10 @@ def extract_test_accuracy(bovw, classifier, dataset):
     acc = accuracy_score(labels, preds)
     return acc
 
-def gridsearch(train_data, test_data, n_folds=5):
+def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only=False):
     """
     Full grid search over:
+    - detector types (SIFT, Dense SIFT, AKAZE, ORB)
     - classifier types
     - classifier hyperparameters
     - codebook sizes
@@ -241,11 +242,21 @@ def gridsearch(train_data, test_data, n_folds=5):
         train_data: Training dataset
         test_data: Test dataset for final evaluation
         n_folds: Number of folds for cross-validation (default: 5)
+        config_indices: List of configuration indices to run (None = run all)
+        count_only: If True, only count and print total configurations, then exit
     """
 
     best_acc = -1
     best_config = None
-    run_index = 0
+    run_index = -1  # Will be incremented before use
+
+    # Ensure SELECTED_DETECTOR and USE_DENSE_SIFT are lists
+    detector_list = SELECTED_DETECTOR if isinstance(SELECTED_DETECTOR, list) else [SELECTED_DETECTOR]
+    dense_sift_list = USE_DENSE_SIFT if isinstance(USE_DENSE_SIFT, list) else [USE_DENSE_SIFT]
+
+    # They should have the same length
+    assert len(detector_list) == len(dense_sift_list), \
+        "SELECTED_DETECTOR and USE_DENSE_SIFT must have the same length"
 
     for classifier_name in SELECTED_CLASSIFIER:
         param_grid = CLASSIFIER_PARAMETERS[classifier_name]
@@ -254,9 +265,10 @@ def gridsearch(train_data, test_data, n_folds=5):
         combinations = list(itertools.product(*param_value_lists))
 
         for codebook_size in CODEBOOK_SIZE:
-            for use_dense in USE_DENSE_SIFT:
+            # Iterate over detector/dense_sift pairs
+            for detector_type, use_dense in zip(detector_list, dense_sift_list):
                 # Only iterate dense parameters if using dense SIFT with SIFT detector
-                if use_dense and SELECTED_DETECTOR == "SIFT":
+                if use_dense and detector_type == "SIFT":
                     dense_step_range = DENSE_STEP_SIZES
                     dense_scales_range = DENSE_SCALES
                 else:
@@ -278,22 +290,36 @@ def gridsearch(train_data, test_data, n_folds=5):
                                     clf_params = dict(zip(param_names, param_tuple))
                                     run_index += 1
 
+                                    # If counting only, just increment and continue
+                                    if count_only:
+                                        continue
+
+                                    # Skip if config_indices specified and this index not in list
+                                    if config_indices is not None and run_index not in config_indices:
+                                        continue
+
+                                    # Create descriptive run name
+                                    detector_name = f"Dense-SIFT" if use_dense and detector_type == "SIFT" else detector_type
+                                    pyramid_str = f"_pyr-{spatial_pyramid_type}-L{pyramid_level}" if spatial_pyramid_type else ""
+                                    run_name = f"{detector_name}_k{codebook_size}_{classifier_name}{pyramid_str}"
+
                                     print("\n------------")
-                                    print(f" RUN {run_index}: Clf={classifier_name}, codebook={codebook_size}")
-                                    print(f" Dense SIFT: {use_dense}, step: {dense_step}, scales: {dense_scales}")
+                                    print(f" RUN {run_index}: {run_name}")
+                                    print(f" Detector={detector_type}, Dense SIFT: {use_dense}, step: {dense_step}, scales: {dense_scales}")
                                     print(f" Spatial pyramid: {spatial_pyramid_type}, levels: {pyramid_level}")
                                     print(f" params={clf_params}")
                                     print("-------------")
 
                                     wandb.init(
                                         project="BoVW-GridSearch",
+                                        name=run_name,
                                         config={
                                             "run_id": run_index,
                                             "classifier": classifier_name,
                                             "clf_params": clf_params,
                                             "codebook_size": int(codebook_size),
-                                            "detector": SELECTED_DETECTOR,
-                                            "detector_params": DETECTOR_PARAMETERS[SELECTED_DETECTOR],
+                                            "detector": detector_type,
+                                            "detector_params": DETECTOR_PARAMETERS[detector_type],
                                             "dense_sift": bool(use_dense),
                                             "dense_step": int(dense_step),
                                             "dense_scales": dense_scales,
@@ -316,9 +342,9 @@ def gridsearch(train_data, test_data, n_folds=5):
 
                                         # Build BoVW for this fold
                                         bovw = BOVW(
-                                            detector_type=SELECTED_DETECTOR,
+                                            detector_type=detector_type,
                                             codebook_size=int(codebook_size),
-                                            detector_kwargs=DETECTOR_PARAMETERS[SELECTED_DETECTOR],
+                                            detector_kwargs=DETECTOR_PARAMETERS[detector_type],
                                             spatial_pyramid=spatial_pyramid_type,
                                             pyramid_levels=int(pyramid_level),
                                             dense_sift=bool(use_dense),
@@ -352,9 +378,9 @@ def gridsearch(train_data, test_data, n_folds=5):
                                     # Train on full training set and evaluate on test set
                                     print("\nTraining on full training set...")
                                     bovw_final = BOVW(
-                                        detector_type=SELECTED_DETECTOR,
+                                        detector_type=detector_type,
                                         codebook_size=int(codebook_size),
-                                        detector_kwargs=DETECTOR_PARAMETERS[SELECTED_DETECTOR],
+                                        detector_kwargs=DETECTOR_PARAMETERS[detector_type],
                                         spatial_pyramid=spatial_pyramid_type,
                                         pyramid_levels=int(pyramid_level),
                                         dense_sift=bool(use_dense),
@@ -384,6 +410,7 @@ def gridsearch(train_data, test_data, n_folds=5):
                                         best_acc = mean_cv_acc
                                         best_config = {
                                             "classifier": classifier_name,
+                                            "detector": detector_type,
                                             "codebook_size": codebook_size,
                                             "dense_sift": use_dense,
                                             "dense_step": dense_step,
@@ -397,4 +424,11 @@ def gridsearch(train_data, test_data, n_folds=5):
                                         }
 
                                     wandb.finish()
+
+    # If count_only mode, print total and return
+    if count_only:
+        total_configs = run_index + 1
+        print(f"\nTotal number of configurations: {total_configs}")
+        return None
+
     return best_config
