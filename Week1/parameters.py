@@ -54,3 +54,6 @@ DENSE_STEP_SIZES = [8]  # Optimal balance: dense coverage without excessive comp
 DENSE_SCALES = [
     [8, 16, 24, 32],  # Multiple scales: captures textures (8) to structures (32)
 ]
+
+SCALER_TYPES = [None, "l1", "l2", "standard"]
+FEATURE_ENCODINGS = ["fisher"]

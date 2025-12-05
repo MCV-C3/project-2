@@ -1,8 +1,9 @@
+import glob
 import os
 from typing import *
-from PIL import Image
-import glob
+
 from grid_search import gridsearch
+from PIL import Image
 
 
 def Dataset(ImageFolder:str = "data/MIT_split/train") -> List[Tuple[Type[Image.Image], int]]:
@@ -36,8 +37,8 @@ def Dataset(ImageFolder:str = "data/MIT_split/train") -> List[Tuple[Type[Image.I
 
 
 if __name__ == "__main__":
-    data_train = Dataset(ImageFolder="../places_reduced/train")
-    data_test = Dataset(ImageFolder="../places_reduced/val")
+    data_train = Dataset(ImageFolder=r"C:\Users\maiol\Desktop\Master\C3\places_reduced\train")
+    data_test = Dataset(ImageFolder=r"C:\Users\maiol\Desktop\Master\C3\places_reduced\val")
 
     # Run grid search with k-fold cross-validation (default: 5 folds)
     best_config = gridsearch(data_train, data_test, n_folds=5)
