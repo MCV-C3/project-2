@@ -1,4 +1,14 @@
 import os
+
+# Limit threads per process BEFORE importing numpy/sklearn/opencv
+# This prevents each parallel process from spawning too many threads
+# With 4 parallel processes and 2 threads each = 8 cores total
+os.environ['OMP_NUM_THREADS'] = '2'
+os.environ['MKL_NUM_THREADS'] = '2'
+os.environ['OPENBLAS_NUM_THREADS'] = '2'
+os.environ['NUMEXPR_NUM_THREADS'] = '2'
+os.environ['OPENCV_NUM_THREADS'] = '2'
+
 import argparse
 from typing import *
 from PIL import Image

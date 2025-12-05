@@ -11,13 +11,35 @@ import tqdm
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import KFold
 
-from parameters import (
-    CLASSIFIER_PARAMETERS, CODEBOOK_SIZE,
-    SELECTED_DETECTOR, DETECTOR_PARAMETERS,
-    SELECTED_CLASSIFIER,
-    SPATIAL_PYRAMID_TYPES, PYRAMID_LEVELS,
-    USE_DENSE_SIFT, DENSE_STEP_SIZES, DENSE_SCALES,
-)
+import importlib
+import sys
+
+# Allow specifying which parameters file to use
+PARAMS_MODULE = sys.modules.get('__params__', None)
+if PARAMS_MODULE is None:
+    from parameters import (
+        CLASSIFIER_PARAMETERS, CODEBOOK_SIZE,
+        SELECTED_DETECTOR, DETECTOR_PARAMETERS,
+        SELECTED_CLASSIFIER,
+        SPATIAL_PYRAMID_TYPES, PYRAMID_LEVELS,
+        USE_DENSE_SIFT, DENSE_STEP_SIZES, DENSE_SCALES,
+    )
+    DETECTOR_TYPE_MAP = None
+    WANDB_PROJECT = "BoVW-GridSearch"
+else:
+    CLASSIFIER_PARAMETERS = PARAMS_MODULE.CLASSIFIER_PARAMETERS
+    CODEBOOK_SIZE = PARAMS_MODULE.CODEBOOK_SIZE
+    SELECTED_DETECTOR = PARAMS_MODULE.SELECTED_DETECTOR
+    DETECTOR_PARAMETERS = PARAMS_MODULE.DETECTOR_PARAMETERS
+    SELECTED_CLASSIFIER = PARAMS_MODULE.SELECTED_CLASSIFIER
+    SPATIAL_PYRAMID_TYPES = PARAMS_MODULE.SPATIAL_PYRAMID_TYPES
+    PYRAMID_LEVELS = PARAMS_MODULE.PYRAMID_LEVELS
+    USE_DENSE_SIFT = PARAMS_MODULE.USE_DENSE_SIFT
+    DENSE_STEP_SIZES = PARAMS_MODULE.DENSE_STEP_SIZES
+    DENSE_SCALES = PARAMS_MODULE.DENSE_SCALES
+    DETECTOR_TYPE_MAP = getattr(PARAMS_MODULE, 'DETECTOR_TYPE_MAP', None)
+    WANDB_PROJECT = getattr(PARAMS_MODULE, 'WANDB_PROJECT', 'BoVW-GridSearch')
+
 from classifiers import create_classifier
 from bovw import BOVW
 from utils import compute_hash
@@ -310,8 +332,11 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                     print(f" params={clf_params}")
                                     print("-------------")
 
+                                    # Get actual detector type (SIFT/AKAZE/ORB)
+                                    actual_detector_type = DETECTOR_TYPE_MAP.get(detector_type, detector_type) if DETECTOR_TYPE_MAP else detector_type
+
                                     wandb.init(
-                                        project="BoVW-GridSearch",
+                                        project=WANDB_PROJECT,
                                         name=run_name,
                                         config={
                                             "run_id": run_index,
@@ -319,6 +344,7 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                             "clf_params": clf_params,
                                             "codebook_size": int(codebook_size),
                                             "detector": detector_type,
+                                            "actual_detector_type": actual_detector_type,
                                             "detector_params": DETECTOR_PARAMETERS[detector_type],
                                             "dense_sift": bool(use_dense),
                                             "dense_step": int(dense_step),
@@ -342,7 +368,7 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
 
                                         # Build BoVW for this fold
                                         bovw = BOVW(
-                                            detector_type=detector_type,
+                                            detector_type=actual_detector_type,
                                             codebook_size=int(codebook_size),
                                             detector_kwargs=DETECTOR_PARAMETERS[detector_type],
                                             spatial_pyramid=spatial_pyramid_type,
@@ -378,7 +404,7 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                     # Train on full training set and evaluate on test set
                                     print("\nTraining on full training set...")
                                     bovw_final = BOVW(
-                                        detector_type=detector_type,
+                                        detector_type=actual_detector_type,
                                         codebook_size=int(codebook_size),
                                         detector_kwargs=DETECTOR_PARAMETERS[detector_type],
                                         spatial_pyramid=spatial_pyramid_type,

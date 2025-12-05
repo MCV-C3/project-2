@@ -11,7 +11,8 @@ from typing import *
 class BOVW():
 
     def __init__(self, detector_type="AKAZE", codebook_size:int=50, detector_kwargs:dict={}, codebook_kwargs:dict={},
-                 spatial_pyramid=None, pyramid_levels=1, dense_sift=False, dense_step=8, dense_scales=[8, 16, 24, 32]):
+                 spatial_pyramid=None, pyramid_levels=1, dense_sift=False, dense_step=8, dense_scales=[8, 16, 24, 32],
+                 use_dense_cache=False, dense_cache_dir="cache/dense_sift"):
         self.detector_type = detector_type
         if self.detector_type == 'SIFT':
             self.detector = cv2.SIFT_create(**detector_kwargs)
@@ -33,14 +34,65 @@ class BOVW():
         self.dense_sift = dense_sift
         self.dense_step = dense_step
         self.dense_scales = dense_scales if isinstance(dense_scales, list) else [dense_scales]
-        
-               
+
+        # Cache parameters
+        self.use_dense_cache = use_dense_cache
+        self.dense_cache_dir = dense_cache_dir
+        self._dense_cache = None
+
+        # Initialize cache if needed
+        if self.use_dense_cache and self.dense_sift and self.detector_type == 'SIFT':
+            from dense_cache import DenseSIFTCache
+            self._dense_cache = DenseSIFTCache(self.dense_cache_dir)
+
+
     ## Modify this function in order to be able to create a dense sift
-    def _extract_features(self, image: Literal["H", "W", "C"]) -> Tuple:
+    def _extract_features(self, image: Literal["H", "W", "C"], image_id: str = None) -> Tuple:
+        """
+        Extract features from image.
+
+        Args:
+            image: Input image
+            image_id: Optional image identifier for cache lookup
+
+        Returns:
+            keypoints, descriptors
+        """
         if self.dense_sift and self.detector_type == 'SIFT':
+            # Try to load from cache first
+            if self.use_dense_cache and self._dense_cache is not None and image_id is not None:
+                try:
+                    return self._extract_from_cache(image_id)
+                except (FileNotFoundError, ValueError) as e:
+                    # Cache miss or incompatible parameters, fall back to extraction
+                    print(f"Cache miss for {image_id}, extracting: {e}")
+                    pass
+
             return self._extract_dense_sift(image)
         else:
             return self.detector.detectAndCompute(image, None)
+
+    def _extract_from_cache(self, image_id: str) -> Tuple:
+        """
+        Load descriptors from cache with subsampling.
+
+        Args:
+            image_id: Image identifier
+
+        Returns:
+            keypoints, descriptors
+        """
+        if self._dense_cache is None:
+            raise ValueError("Cache not initialized")
+
+        # Load and subsample
+        keypoints, descriptors = self._dense_cache.load_and_subsample(
+            image_id=image_id,
+            target_step=self.dense_step,
+            target_scales=self.dense_scales
+        )
+
+        return keypoints, descriptors
 
     def _extract_dense_sift(self, image: np.ndarray) -> Tuple:
         """

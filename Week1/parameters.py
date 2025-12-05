@@ -72,3 +72,12 @@ DENSE_STEP_SIZES = [8]  # Good step size for dense sampling
 DENSE_SCALES = [
     [8, 16, 24, 32],  # Multi-scale: captures features at different scales
 ]
+
+# Dense SIFT Cache parameters
+USE_DENSE_CACHE = False  # Set to True to use pre-computed cache
+DENSE_CACHE_DIR = "cache/dense_sift"  # Cache directory
+
+# Cache building parameters (for build_dense_cache.py)
+# Extract at high density, then subsample for experiments
+CACHE_STEP = 4  # Dense grid for caching
+CACHE_SCALES = [8, 12, 16, 24, 32]  # All scales you might want to test
