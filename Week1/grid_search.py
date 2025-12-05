@@ -95,17 +95,23 @@ def load_cache(dataset, bovw):
     cache_file = _get_cache_file(dataset, bovw)
 
     if os.path.exists(cache_file):
-        with open(cache_file, "rb") as f:
-            data = pickle.load(f)
-        # Support both old format (tuple) and new format (dict)
-        if isinstance(data, tuple):
-            all_descriptors, all_labels = data
-            all_keypoints = None
-        else:
-            all_descriptors = data['descriptors']
-            all_labels = data['labels']
-            all_keypoints = data.get('keypoints', None)
-        return all_descriptors, all_labels, all_keypoints
+        try:
+            with open(cache_file, "rb") as f:
+                data = pickle.load(f)
+            # Support both old format (tuple) and new format (dict)
+            if isinstance(data, tuple):
+                all_descriptors, all_labels = data
+                all_keypoints = None
+            else:
+                all_descriptors = data['descriptors']
+                all_labels = data['labels']
+                all_keypoints = data.get('keypoints', None)
+            return all_descriptors, all_labels, all_keypoints
+        except (EOFError, pickle.UnpicklingError, Exception) as e:
+            # Corrupted cache file, delete it and return None
+            print(f"Warning: Corrupted cache file {cache_file}, deleting: {e}")
+            os.remove(cache_file)
+            return None
     else:
         return None
 
@@ -184,10 +190,12 @@ def train(dataset: List[Tuple[Image.Image, int]],
 
         os.makedirs(root / "cache", exist_ok=True)
         cache_file = _get_cache_file(dataset, bovw)
+        # Don't cache keypoints - cv2.KeyPoint objects are not picklable
+        # They're only used for spatial pyramids and need to be recomputed anyway
         cache_data = {
             'descriptors': all_descriptors,
             'labels': all_labels,
-            'keypoints': all_keypoints
+            'keypoints': None  # Don't cache keypoints
         }
         with open(cache_file, "wb") as f:
             pickle.dump(cache_data, f)
