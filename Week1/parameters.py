@@ -3,11 +3,7 @@ import numpy as np
 # Classifier parameters
 CLASSIFIER_PARAMETERS = {
     "LogisticRegression": {
-        "penalty": ["l2"],
-        "C": [1.0],  # Good default regularization
         "class_weight": ["balanced"],  # Handle class imbalance
-        "max_iter": [2000],  # Sufficient iterations for convergence
-        "solver": ["lbfgs"]  # Efficient solver for multiclass problems
     },
 
     "SVM": {
@@ -28,8 +24,6 @@ SELECTED_CLASSIFIER = ["LogisticRegression"] # Selected Classifier
 DETECTOR_PARAMETERS = {
     "SIFT": {
         "nfeatures": 0,  # 0 = unlimited features (standard SIFT default)
-        "contrastThreshold": 0.04,  # Good balance for feature detection
-        "edgeThreshold": 10  # Standard default
     },
 
     "AKAZE": {
@@ -53,21 +47,21 @@ DETECTOR_PARAMETERS = {
 }
 
 # Run all four descriptor configurations for comparison
-SELECTED_DETECTOR = ["SIFT", "SIFT", "AKAZE", "ORB"]
+SELECTED_DETECTOR = ["SIFT", ]
 
 
 # Codebook parameters
-CODEBOOK_SIZE = [512]  # Good vocabulary size for all descriptors
+CODEBOOK_SIZE = [300]  # Good vocabulary size for all descriptors
 
 
 # Spatial Pyramid parameters
-SPATIAL_PYRAMID_TYPES = [None]
-PYRAMID_LEVELS = [1]  # No spatial pyramid for fair comparison
+SPATIAL_PYRAMID_TYPES = ["square"]
+PYRAMID_LEVELS = [5]  # No spatial pyramid for fair comparison
 
 
 # Dense SIFT parameters
 # First SIFT will use regular SIFT (False), second will use Dense SIFT (True)
-USE_DENSE_SIFT = [False, True, False, False]
+USE_DENSE_SIFT = [False, ]
 DENSE_STEP_SIZES = [8]  # Good step size for dense sampling
 DENSE_SCALES = [
     [8, 16, 24, 32],  # Multi-scale: captures features at different scales
