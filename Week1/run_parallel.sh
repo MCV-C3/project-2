@@ -12,8 +12,8 @@ if ! command -v python &> /dev/null; then
     PYTHON_CMD="python3"
 fi
 
-# Default number of parallel processes (use all CPU cores)
-N_SPLITS=${1:-$(nproc)}
+# Default to 4 parallel processes (safe default)
+N_SPLITS=${1:-4}
 
 echo "============================================"
 echo "Parallel BoVW Grid Search Runner"
