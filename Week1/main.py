@@ -75,7 +75,7 @@ if __name__ == "__main__":
     best_config = gridsearch(
         data_train,
         data_test,
-        n_folds=args.n_folds,
+        n_folds=5,
         config_indices=config_indices,
         count_only=args.count_configs
     )
