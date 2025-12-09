@@ -1,3 +1,4 @@
+import glob
 import os
 
 # Limit threads per process BEFORE importing numpy/sklearn/opencv
@@ -11,6 +12,8 @@ os.environ['OPENCV_NUM_THREADS'] = '2'
 
 import argparse
 from typing import *
+
+from grid_search import gridsearch
 from PIL import Image
 import glob
 
@@ -86,7 +89,7 @@ if __name__ == "__main__":
     best_config = gridsearch(
         data_train,
         data_test,
-        n_folds=5,
+        n_folds=args.n_folds,
         config_indices=config_indices,
         count_only=args.count_configs
     )

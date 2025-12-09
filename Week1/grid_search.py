@@ -1,17 +1,25 @@
+import itertools
 import os
 import pickle
-import itertools
-import wandb
-import numpy as np
 from pathlib import Path
 import csv
 
 from typing import *
-from PIL import Image
+
+import numpy as np
 import tqdm
+import wandb
+from bovw import BOVW
+from classifiers import create_classifier
+from parameters import (CLASSIFIER_PARAMETERS, CODEBOOK_SIZE, DENSE_SCALES,
+                        DENSE_STEP_SIZES, DETECTOR_PARAMETERS, PYRAMID_LEVELS,
+                        SELECTED_CLASSIFIER, SELECTED_DETECTOR,
+                        SPATIAL_PYRAMID_TYPES, USE_DENSE_SIFT, SCALER_TYPES, FEATURE_ENCODINGS)
+from PIL import Image
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import KFold
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import Normalizer, StandardScaler
 import cv2
 
 import importlib
@@ -190,6 +198,14 @@ if PARAMS_MODULE is None:
         from parameters import PCA_DIMENSIONS
     except ImportError:
         PCA_DIMENSIONS = [None]  # No PCA by default
+    try:
+        from parameters import SCALER_TYPES
+    except ImportError:
+        SCALER_TYPES = [None]
+    try:
+        from parameters import FEATURE_ENCODINGS
+    except ImportError:
+        FEATURE_ENCODINGS = ["bovw"]
     WANDB_PROJECT = "BoVW-GridSearch"
 else:
     CLASSIFIER_PARAMETERS = PARAMS_MODULE.CLASSIFIER_PARAMETERS
@@ -206,12 +222,13 @@ else:
     WANDB_PROJECT = getattr(PARAMS_MODULE, 'WANDB_PROJECT', 'BoVW-GridSearch')
     CSV_FILENAME = getattr(PARAMS_MODULE, 'CSV_FILENAME', 'grid_search_results.csv')
     PCA_DIMENSIONS = getattr(PARAMS_MODULE, 'PCA_DIMENSIONS', [None])
+    SCALER_TYPES = getattr(PARAMS_MODULE, 'SCALER_TYPES', [None])
+    FEATURE_ENCODINGS = getattr(PARAMS_MODULE, 'FEATURE_ENCODINGS', ["bovw"])
 
 from classifiers import create_classifier
 from bovw import BOVW
 from utils import compute_hash
-
-
+from fisher_vector import FisherEncoder
 root = Path.cwd() / "Week1"
 
 
@@ -280,13 +297,16 @@ def test(dataset: List[Tuple[Type[Image.Image], int]],
     y_pred = classifier.predict(bovw_histograms)
 
     print("Accuracy on Phase[Test]:", accuracy_score(y_true=descriptors_labels, y_pred=y_pred))
-    
+
+
 def train(dataset: List[Tuple[Image.Image, int]],
           bovw: Type[BOVW],
           classifier_name: str = "logreg",
           classifier_kwargs: dict | None = None,
           dataset_indices: List[int] = None,
-          pca_dim: int = None):
+          pca_dim: int = None,
+          encoding_type: str = "bovw",
+          scaler_type: str = None):
 
     if classifier_kwargs is None:
         classifier_kwargs = {}
@@ -300,38 +320,60 @@ def train(dataset: List[Tuple[Image.Image, int]],
         indices=dataset_indices
     )
 
-    print("Fitting the codebook")
-    kmeans, cluster_centers = bovw._update_fit_codebook(descriptors=all_descriptors)
+    if encoding_type == "bovw":
+        print("Fitting BoVW codebook")
+        bovw._update_fit_codebook(all_descriptors)
 
-    print("Computing the bovw histograms")
-    bovw_histograms = extract_bovw_histograms(
-        descriptors=all_descriptors,
-        bovw=bovw,
-        keypoints_list=all_keypoints,
-        images=train_images if use_spatial else None
-    )
+        print("Computing features (BoVW)")
+        fv_encoder = None
+        features = extract_bovw_histograms(
+            descriptors=all_descriptors,
+            bovw=bovw,
+            keypoints_list=all_keypoints,
+            images=train_images if use_spatial else None
+        )
+    elif encoding_type == "fisher":
+        print("Fitting Fisher Vector encoder")
+        fv_encoder = FisherEncoder(n_components=bovw.codebook_size)
+        fv_encoder.fit(all_descriptors)
+        features = fv_encoder.transform(all_descriptors)
+    else:
+        raise ValueError(f"Unknown encoding_type: {encoding_type}")
 
     # Apply PCA if dimensionality reduction is requested
     pca = None
     if pca_dim is not None:
-        print(f"Applying PCA: {bovw_histograms.shape[1]} -> {pca_dim} dimensions")
+        print(f"Applying PCA: {features.shape[1]} -> {pca_dim} dimensions")
         pca = PCA(n_components=pca_dim, random_state=42)
-        bovw_histograms = pca.fit_transform(bovw_histograms)
+        features = pca.fit_transform(features)
         print(f"PCA explained variance ratio: {pca.explained_variance_ratio_.sum():.4f}")
+
+    # Apply scaler if requested
+    if scaler_type == "standard":
+        scaler = StandardScaler()
+        features = scaler.fit_transform(features)
+    elif scaler_type == "l2":
+        scaler = Normalizer(norm="l2")
+        features = scaler.fit_transform(features)
+    elif scaler_type == "l1":
+        scaler = Normalizer(norm="l1")
+        features = scaler.fit_transform(features)
+    else:
+        scaler = None
 
     print(f"Creating classifier: {classifier_name}")
     classifier = create_classifier(classifier_name, **classifier_kwargs)
+    classifier.fit(features, all_labels)
 
-    print("Fitting the classifier")
-    classifier.fit(bovw_histograms, all_labels)
-
-    train_acc = accuracy_score(y_true=all_labels, y_pred=classifier.predict(bovw_histograms))
+    train_pred = classifier.predict(features)
+    train_acc = accuracy_score(all_labels, train_pred)
     print(f"Accuracy on Phase[Train]: {train_acc}")
 
-    return bovw, classifier, train_acc, pca
+    return bovw, classifier, train_acc, pca, scaler, fv_encoder
 
 
-def extract_test_accuracy(bovw, classifier, dataset, dataset_indices=None, pca=None):
+def extract_test_accuracy(bovw, classifier, dataset, dataset_indices=None, pca=None,
+                          scaler=None, fv_encoder=None, encoding_type="bovw"):
     """
     Compute BoVW histograms and accuracy on test set.
     Can use cached descriptors if dataset_indices is provided.
@@ -366,16 +408,25 @@ def extract_test_accuracy(bovw, classifier, dataset, dataset_indices=None, pca=N
                     keypoints_list.append(keypoints)
                     images_list.append(img)
 
-    histograms = extract_bovw_histograms(
-        bovw=bovw,
-        descriptors=descriptors_list,
-        keypoints_list=keypoints_list,
-        images=images_list if keypoints_list else None
-    )
+    if encoding_type == "bovw":
+        histograms = extract_bovw_histograms(
+            bovw=bovw,
+            descriptors=descriptors_list,
+            keypoints_list=keypoints_list,
+            images=images_list if keypoints_list else None
+        )
+    elif encoding_type == "fisher":
+        histograms = fv_encoder.transform(descriptors_list)
+    else:
+        raise ValueError(f"Unknown encoding_type: {encoding_type}")
 
     # Apply PCA transformation if provided
     if pca is not None:
         histograms = pca.transform(histograms)
+
+    # Apply scaler if provided
+    if scaler is not None:
+        histograms = scaler.transform(histograms)
 
     preds = classifier.predict(histograms)
     acc = accuracy_score(labels, preds)
@@ -390,6 +441,9 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
     - codebook sizes
     - spatial pyramid configurations
     - dense SIFT configurations
+    - encoding types (BoVW, Fisher)
+    - scaler types
+    - PCA dimensions
     Uses k-fold cross-validation on the training data.
     And logs everything to W&B.
 
@@ -412,7 +466,7 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
     # Create CSV header
     csv_headers = [
         "run_id", "classifier", "detector", "codebook_size", "spatial_pyramid", "pyramid_levels",
-        "dense_sift", "dense_step", "dense_scales", "pca_dim"
+        "dense_sift", "dense_step", "dense_scales", "pca_dim", "encoding_type", "scaler_type"
     ]
     # Add headers for each fold
     for fold_idx in range(1, n_folds + 1):
@@ -446,246 +500,268 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
         param_value_lists = list(param_grid.values())
         combinations = list(itertools.product(*param_value_lists))
 
-        for codebook_size in CODEBOOK_SIZE:
-            # Iterate over detector/dense_sift pairs
-            for detector_type, use_dense in zip(detector_list, dense_sift_list):
-                # Get actual detector type (SIFT/AKAZE/ORB)
-                actual_detector_type = DETECTOR_TYPE_MAP.get(detector_type, detector_type) if DETECTOR_TYPE_MAP else detector_type
+        for encoding_type in FEATURE_ENCODINGS:
+            for codebook_size in CODEBOOK_SIZE:
+                # Iterate over detector/dense_sift pairs
+                for detector_type, use_dense in zip(detector_list, dense_sift_list):
+                    # Get actual detector type (SIFT/AKAZE/ORB)
+                    actual_detector_type = DETECTOR_TYPE_MAP.get(detector_type, detector_type) if DETECTOR_TYPE_MAP else detector_type
 
-                # Only iterate dense parameters if using dense SIFT with SIFT detector
-                if use_dense and actual_detector_type == "SIFT":
-                    dense_step_range = DENSE_STEP_SIZES
-                    dense_scales_range = DENSE_SCALES
-                else:
-                    dense_step_range = [8]  # Default value (won't be used)
-                    dense_scales_range = [[16]]  # Default value (won't be used)
+                    # Only iterate dense parameters if using dense SIFT with SIFT detector
+                    if use_dense and actual_detector_type == "SIFT":
+                        dense_step_range = DENSE_STEP_SIZES
+                        dense_scales_range = DENSE_SCALES
+                    else:
+                        dense_step_range = [8]  # Default value (won't be used)
+                        dense_scales_range = [[16]]  # Default value (won't be used)
 
-                for dense_step in dense_step_range:
-                    for dense_scales in dense_scales_range:
-                        # Skip dense iterations if not using dense SIFT
-                        if not use_dense and (dense_step != dense_step_range[0] or dense_scales != dense_scales_range[0]):
-                            continue
+                    for dense_step in dense_step_range:
+                        for dense_scales in dense_scales_range:
+                            # Skip dense iterations if not using dense SIFT
+                            if not use_dense and (dense_step != dense_step_range[0] or dense_scales != dense_scales_range[0]):
+                                continue
 
-                        for spatial_pyramid_type in SPATIAL_PYRAMID_TYPES:
-                            # Only iterate over pyramid levels if we have a spatial pyramid type
-                            pyramid_level_range = PYRAMID_LEVELS if spatial_pyramid_type else [1]
+                            for spatial_pyramid_type in SPATIAL_PYRAMID_TYPES:
+                                # Only iterate over pyramid levels if we have a spatial pyramid type
+                                pyramid_level_range = PYRAMID_LEVELS if spatial_pyramid_type else [1]
 
-                            for pyramid_level in pyramid_level_range:
-                                for pca_dim in PCA_DIMENSIONS:
-                                    for param_tuple in combinations:
-                                        clf_params = dict(zip(param_names, param_tuple))
-                                        run_index += 1
+                                for pyramid_level in pyramid_level_range:
+                                    for scaler_type in SCALER_TYPES:
+                                        for pca_dim in PCA_DIMENSIONS:
+                                            for param_tuple in combinations:
+                                                clf_params = dict(zip(param_names, param_tuple))
+                                                run_index += 1
 
-                                        # If counting only, just increment and continue
-                                        if count_only:
-                                            continue
+                                                # If counting only, just increment and continue
+                                                if count_only:
+                                                    continue
 
-                                        # Skip if config_indices specified and this index not in list
-                                        if config_indices is not None and run_index not in config_indices:
-                                            continue
+                                                # Skip if config_indices specified and this index not in list
+                                                if config_indices is not None and run_index not in config_indices:
+                                                    continue
 
-                                        # Create descriptive run name
-                                        detector_name = f"Dense-SIFT" if use_dense and detector_type == "SIFT" else detector_type
-                                        pyramid_str = f"_pyr-{spatial_pyramid_type}-L{pyramid_level}" if spatial_pyramid_type else ""
-                                        pca_str = f"_pca{pca_dim}" if pca_dim else ""
-                                        run_name = f"{detector_name}_k{codebook_size}_{classifier_name}{pyramid_str}{pca_str}"
+                                                # Create descriptive run name
+                                                detector_name = f"Dense-SIFT" if use_dense and actual_detector_type == "SIFT" else actual_detector_type
+                                                pyramid_str = f"_pyr-{spatial_pyramid_type}-L{pyramid_level}" if spatial_pyramid_type else ""
+                                                pca_str = f"_pca{pca_dim}" if pca_dim else ""
+                                                scaler_str = f"_scaler-{scaler_type}" if scaler_type else ""
+                                                encoding_str = f"_{encoding_type}"
+                                                run_name = f"{detector_name}_k{codebook_size}_{classifier_name}{pyramid_str}{pca_str}{scaler_str}{encoding_str}"
 
-                                        print("\n------------")
-                                        print(f" RUN {run_index}: {run_name}")
-                                        print(f" Detector={detector_type}, Dense SIFT: {use_dense}, step: {dense_step}, scales: {dense_scales}")
-                                        print(f" Spatial pyramid: {spatial_pyramid_type}, levels: {pyramid_level}")
-                                        print(f" PCA dimensions: {pca_dim if pca_dim else 'None'}")
-                                        print(f" params={clf_params}")
-                                        print("-------------")
+                                                print("\n------------")
+                                                print(f" RUN {run_index}: {run_name}")
+                                                print(f" Detector={detector_type}, Dense SIFT: {use_dense}, step: {dense_step}, scales: {dense_scales}")
+                                                print(f" Spatial pyramid: {spatial_pyramid_type}, levels: {pyramid_level}")
+                                                print(f" Encoding: {encoding_type}, Scaler: {scaler_type}")
+                                                print(f" PCA dimensions: {pca_dim if pca_dim else 'None'}")
+                                                print(f" params={clf_params}")
+                                                print("-------------")
 
-                                        # Create BOVW for descriptor extraction
-                                        bovw_for_descriptors = BOVW(
-                                            detector_type=actual_detector_type,
-                                            codebook_size=int(codebook_size),
-                                            detector_kwargs=DETECTOR_PARAMETERS[detector_type],
-                                            spatial_pyramid=spatial_pyramid_type,
-                                            pyramid_levels=int(pyramid_level),
-                                            dense_sift=bool(use_dense),
-                                            dense_step=int(dense_step),
-                                            dense_scales=dense_scales
-                                        )
+                                                # Create BOVW for descriptor extraction
+                                                bovw_for_descriptors = BOVW(
+                                                    detector_type=actual_detector_type,
+                                                    codebook_size=int(codebook_size),
+                                                    detector_kwargs=DETECTOR_PARAMETERS[detector_type],
+                                                    spatial_pyramid=spatial_pyramid_type,
+                                                    pyramid_levels=int(pyramid_level),
+                                                    dense_sift=bool(use_dense),
+                                                    dense_step=int(dense_step),
+                                                    dense_scales=dense_scales
+                                                )
 
-                                        # PRE-COMPUTE descriptors for the entire training dataset
-                                        print("\nPre-computing descriptors for all training images...")
-                                        precompute_descriptors(train_data, bovw_for_descriptors)
+                                                # PRE-COMPUTE descriptors for the entire training dataset
+                                                print("\nPre-computing descriptors for all training images...")
+                                                precompute_descriptors(train_data, bovw_for_descriptors)
 
-                                        wandb.init(
-                                            project=WANDB_PROJECT,
-                                            name=run_name,
-                                            config={
-                                                "run_id": run_index,
-                                                "classifier": classifier_name,
-                                                "clf_params": clf_params,
-                                                "codebook_size": int(codebook_size),
-                                                "detector": detector_type,
-                                                "actual_detector_type": actual_detector_type,
-                                                "detector_params": DETECTOR_PARAMETERS[detector_type],
-                                                "dense_sift": bool(use_dense),
-                                                "dense_step": int(dense_step),
-                                                "dense_scales": dense_scales,
-                                                "spatial_pyramid": str(spatial_pyramid_type),
-                                                "pyramid_levels": int(pyramid_level),
-                                                "pca_dim": pca_dim if pca_dim else "None",
-                                                "n_folds": n_folds,
-                                            }
-                                        )
+                                                wandb.init(
+                                                    project=WANDB_PROJECT,
+                                                    name=run_name,
+                                                    config={
+                                                        "run_id": run_index,
+                                                        "classifier": classifier_name,
+                                                        "clf_params": clf_params,
+                                                        "codebook_size": int(codebook_size),
+                                                        "detector": detector_type,
+                                                        "actual_detector_type": actual_detector_type,
+                                                        "detector_params": DETECTOR_PARAMETERS[detector_type],
+                                                        "dense_sift": bool(use_dense),
+                                                        "dense_step": int(dense_step),
+                                                        "dense_scales": dense_scales,
+                                                        "spatial_pyramid": str(spatial_pyramid_type),
+                                                        "pyramid_levels": int(pyramid_level),
+                                                        "pca_dim": pca_dim if pca_dim else "None",
+                                                        "encoding_type": encoding_type,
+                                                        "scaler_type": scaler_type if scaler_type else "None",
+                                                        "n_folds": n_folds,
+                                                    }
+                                                )
 
-                                        # Perform k-fold cross-validation
-                                        kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
-                                        fold_accuracies = []
-                                        fold_train_accuracies = []
-                                        fold_pca_variances = []
+                                                # Perform k-fold cross-validation
+                                                kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
+                                                fold_accuracies = []
+                                                fold_train_accuracies = []
+                                                fold_pca_variances = []
 
-                                        for fold_idx, (train_idx, val_idx) in enumerate(kf.split(train_data)):
-                                            print(f"\n  Fold {fold_idx + 1}/{n_folds}")
+                                                for fold_idx, (train_idx, val_idx) in enumerate(kf.split(train_data)):
+                                                    print(f"\n  Fold {fold_idx + 1}/{n_folds}")
 
-                                            # Build BoVW for this fold
-                                            bovw = BOVW(
-                                                detector_type=actual_detector_type,
-                                                codebook_size=int(codebook_size),
-                                                detector_kwargs=DETECTOR_PARAMETERS[detector_type],
-                                                spatial_pyramid=spatial_pyramid_type,
-                                                pyramid_levels=int(pyramid_level),
-                                                dense_sift=bool(use_dense),
-                                                dense_step=int(dense_step),
-                                                dense_scales=dense_scales
-                                            )
+                                                    # Build BoVW for this fold
+                                                    bovw = BOVW(
+                                                        detector_type=actual_detector_type,
+                                                        codebook_size=int(codebook_size),
+                                                        detector_kwargs=DETECTOR_PARAMETERS[detector_type],
+                                                        spatial_pyramid=spatial_pyramid_type,
+                                                        pyramid_levels=int(pyramid_level),
+                                                        dense_sift=bool(use_dense),
+                                                        dense_step=int(dense_step),
+                                                        dense_scales=dense_scales
+                                                    )
 
-                                            # Train on fold - pass INDICES, not subset of data
-                                            bovw, classifier, train_acc, fold_pca = train(
-                                                dataset=train_data,  # Pass full dataset
-                                                bovw=bovw,
-                                                classifier_name=classifier_name,
-                                                classifier_kwargs=clf_params,
-                                                dataset_indices=train_idx,  # Pass indices for this fold
-                                                pca_dim=pca_dim
-                                            )
+                                                    # Train on fold - pass INDICES, not subset of data
+                                                    bovw, classifier, train_acc, fold_pca, fold_scaler, fold_fv = train(
+                                                        dataset=train_data,  # Pass full dataset
+                                                        bovw=bovw,
+                                                        classifier_name=classifier_name,
+                                                        classifier_kwargs=clf_params,
+                                                        dataset_indices=train_idx,  # Pass indices for this fold
+                                                        pca_dim=pca_dim,
+                                                        encoding_type=encoding_type,
+                                                        scaler_type=scaler_type
+                                                    )
 
-                                            # Track PCA explained variance if PCA was used
-                                            if fold_pca is not None:
-                                                fold_pca_variances.append(fold_pca.explained_variance_ratio_.sum())
+                                                    # Track PCA explained variance if PCA was used
+                                                    if fold_pca is not None:
+                                                        fold_pca_variances.append(fold_pca.explained_variance_ratio_.sum())
 
-                                            # Evaluate on validation fold using cached descriptors
-                                            fold_acc = extract_test_accuracy(
-                                                bovw=bovw,
-                                                classifier=classifier,
-                                                dataset=train_data,  # Pass full dataset
-                                                dataset_indices=val_idx,  # Pass validation indices
-                                                pca=fold_pca
-                                            )
-                                            fold_accuracies.append(fold_acc)
-                                            fold_train_accuracies.append(train_acc)
-                                            print(f"  Fold {fold_idx + 1} validation accuracy: {fold_acc:.4f}")
+                                                    # Evaluate on validation fold using cached descriptors
+                                                    fold_acc = extract_test_accuracy(
+                                                        bovw=bovw,
+                                                        classifier=classifier,
+                                                        dataset=train_data,  # Pass full dataset
+                                                        dataset_indices=val_idx,  # Pass validation indices
+                                                        pca=fold_pca,
+                                                        scaler=fold_scaler,
+                                                        fv_encoder=fold_fv,
+                                                        encoding_type=encoding_type
+                                                    )
+                                                    fold_accuracies.append(fold_acc)
+                                                    fold_train_accuracies.append(train_acc)
+                                                    print(f"  Fold {fold_idx + 1} validation accuracy: {fold_acc:.4f}")
 
-                                            wandb.log({
-                                                f"fold_{fold_idx + 1}_train_accuracy": train_acc,
-                                                f"fold_{fold_idx + 1}_val_accuracy": fold_acc
-                                            })
+                                                    wandb.log({
+                                                        f"fold_{fold_idx + 1}_train_accuracy": train_acc,
+                                                        f"fold_{fold_idx + 1}_val_accuracy": fold_acc
+                                                    })
 
-                                        # Calculate mean CV accuracy
-                                        mean_cv_acc = np.mean(fold_accuracies)
-                                        std_cv_acc = np.std(fold_accuracies)
-                                        mean_train_acc = np.mean(fold_train_accuracies)
-                                        std_train_acc = np.std(fold_train_accuracies)
-                                        mean_pca_variance = np.mean(fold_pca_variances) if fold_pca_variances else None
+                                                # Calculate mean CV accuracy
+                                                mean_cv_acc = np.mean(fold_accuracies)
+                                                std_cv_acc = np.std(fold_accuracies)
+                                                mean_train_acc = np.mean(fold_train_accuracies)
+                                                std_train_acc = np.std(fold_train_accuracies)
+                                                mean_pca_variance = np.mean(fold_pca_variances) if fold_pca_variances else None
 
-                                        print(f"\nCross-validation train accuracy: {mean_train_acc:.4f} (+/- {std_train_acc:.4f})")
-                                        print(f"Cross-validation val accuracy: {mean_cv_acc:.4f} (+/- {std_cv_acc:.4f})")
-                                        if mean_pca_variance:
-                                            print(f"Mean PCA explained variance: {mean_pca_variance:.4f}")
+                                                print(f"\nCross-validation train accuracy: {mean_train_acc:.4f} (+/- {std_train_acc:.4f})")
+                                                print(f"Cross-validation val accuracy: {mean_cv_acc:.4f} (+/- {std_cv_acc:.4f})")
+                                                if mean_pca_variance:
+                                                    print(f"Mean PCA explained variance: {mean_pca_variance:.4f}")
 
-                                        # Train on full training set and evaluate on test set
-                                        print("\nTraining on full training set...")
-                                        bovw_final = BOVW(
-                                            detector_type=actual_detector_type,
-                                            codebook_size=int(codebook_size),
-                                            detector_kwargs=DETECTOR_PARAMETERS[detector_type],
-                                            spatial_pyramid=spatial_pyramid_type,
-                                            pyramid_levels=int(pyramid_level),
-                                            dense_sift=bool(use_dense),
-                                            dense_step=int(dense_step),
-                                            dense_scales=dense_scales
-                                        )
+                                                # Train on full training set and evaluate on test set
+                                                print("\nTraining on full training set...")
+                                                bovw_final = BOVW(
+                                                    detector_type=actual_detector_type,
+                                                    codebook_size=int(codebook_size),
+                                                    detector_kwargs=DETECTOR_PARAMETERS[detector_type],
+                                                    spatial_pyramid=spatial_pyramid_type,
+                                                    pyramid_levels=int(pyramid_level),
+                                                    dense_sift=bool(use_dense),
+                                                    dense_step=int(dense_step),
+                                                    dense_scales=dense_scales
+                                                )
 
-                                        bovw_final, classifier_final, final_train_acc, final_pca = train(
-                                            dataset=train_data,
-                                            bovw=bovw_final,
-                                            classifier_name=classifier_name,
-                                            classifier_kwargs=clf_params,
-                                            pca_dim=pca_dim
-                                        )
+                                                bovw_final, classifier_final, final_train_acc, final_pca, final_scaler, final_fv = train(
+                                                    dataset=train_data,
+                                                    bovw=bovw_final,
+                                                    classifier_name=classifier_name,
+                                                    classifier_kwargs=clf_params,
+                                                    pca_dim=pca_dim,
+                                                    encoding_type=encoding_type,
+                                                    scaler_type=scaler_type
+                                                )
 
-                                        test_acc = extract_test_accuracy(bovw_final, classifier_final, test_data, pca=final_pca)
+                                                test_acc = extract_test_accuracy(
+                                                    bovw_final, classifier_final, test_data,
+                                                    pca=final_pca, scaler=final_scaler,
+                                                    fv_encoder=final_fv, encoding_type=encoding_type
+                                                )
 
-                                        wandb_log_dict = {
-                                            "mean_train_accuracy": mean_train_acc,
-                                            "std_train_accuracy": std_train_acc,
-                                            "mean_cv_accuracy": mean_cv_acc,
-                                            "std_cv_accuracy": std_cv_acc,
-                                            "final_train_accuracy": final_train_acc,
-                                            "test_accuracy": test_acc
-                                        }
-                                        if mean_pca_variance:
-                                            wandb_log_dict["pca_explained_variance"] = mean_pca_variance
-                                        wandb.log(wandb_log_dict)
+                                                wandb_log_dict = {
+                                                    "mean_train_accuracy": mean_train_acc,
+                                                    "std_train_accuracy": std_train_acc,
+                                                    "mean_cv_accuracy": mean_cv_acc,
+                                                    "std_cv_accuracy": std_cv_acc,
+                                                    "final_train_accuracy": final_train_acc,
+                                                    "test_accuracy": test_acc
+                                                }
+                                                if mean_pca_variance:
+                                                    wandb_log_dict["pca_explained_variance"] = mean_pca_variance
+                                                wandb.log(wandb_log_dict)
 
-                                        print(f"Test set accuracy: {test_acc:.4f}")
+                                                print(f"Test set accuracy: {test_acc:.4f}")
 
-                                        # Write results to CSV
-                                        csv_row = {
-                                            "run_id": run_index,
-                                            "classifier": classifier_name,
-                                            "detector": detector_type,
-                                            "codebook_size": codebook_size,
-                                            "spatial_pyramid": spatial_pyramid_type if spatial_pyramid_type else "None",
-                                            "pyramid_levels": pyramid_level,
-                                            "dense_sift": use_dense,
-                                            "dense_step": dense_step,
-                                            "dense_scales": str(dense_scales),
-                                            "pca_dim": pca_dim if pca_dim else "None",
-                                            "mean_train_acc": mean_train_acc,
-                                            "std_train_acc": std_train_acc,
-                                            "mean_val_acc": mean_cv_acc,
-                                            "std_val_acc": std_cv_acc,
-                                            "final_train_acc": final_train_acc,
-                                            "test_acc": test_acc,
-                                            "pca_explained_variance": mean_pca_variance if mean_pca_variance else "N/A",
-                                            "clf_params": str(clf_params)
-                                        }
-                                        # Add fold accuracies
-                                        for fold_idx in range(n_folds):
-                                            csv_row[f"fold_{fold_idx + 1}_train_acc"] = fold_train_accuracies[fold_idx]
-                                            csv_row[f"fold_{fold_idx + 1}_val_acc"] = fold_accuracies[fold_idx]
+                                                # Write results to CSV
+                                                csv_row = {
+                                                    "run_id": run_index,
+                                                    "classifier": classifier_name,
+                                                    "detector": detector_type,
+                                                    "codebook_size": codebook_size,
+                                                    "spatial_pyramid": spatial_pyramid_type if spatial_pyramid_type else "None",
+                                                    "pyramid_levels": pyramid_level,
+                                                    "dense_sift": use_dense,
+                                                    "dense_step": dense_step,
+                                                    "dense_scales": str(dense_scales),
+                                                    "pca_dim": pca_dim if pca_dim else "None",
+                                                    "encoding_type": encoding_type,
+                                                    "scaler_type": scaler_type if scaler_type else "None",
+                                                    "mean_train_acc": mean_train_acc,
+                                                    "std_train_acc": std_train_acc,
+                                                    "mean_val_acc": mean_cv_acc,
+                                                    "std_val_acc": std_cv_acc,
+                                                    "final_train_acc": final_train_acc,
+                                                    "test_acc": test_acc,
+                                                    "pca_explained_variance": mean_pca_variance if mean_pca_variance else "N/A",
+                                                    "clf_params": str(clf_params)
+                                                }
+                                                # Add fold accuracies
+                                                for fold_idx in range(n_folds):
+                                                    csv_row[f"fold_{fold_idx + 1}_train_acc"] = fold_train_accuracies[fold_idx]
+                                                    csv_row[f"fold_{fold_idx + 1}_val_acc"] = fold_accuracies[fold_idx]
 
-                                        with open(csv_file, 'a', newline='') as f:
-                                            writer = csv.DictWriter(f, fieldnames=csv_headers)
-                                            writer.writerow(csv_row)
+                                                with open(csv_file, 'a', newline='') as f:
+                                                    writer = csv.DictWriter(f, fieldnames=csv_headers)
+                                                    writer.writerow(csv_row)
 
-                                        # Track best based on CV accuracy
-                                        if mean_cv_acc > best_acc:
-                                            best_acc = mean_cv_acc
-                                            best_config = {
-                                                "classifier": classifier_name,
-                                                "detector": detector_type,
-                                                "codebook_size": codebook_size,
-                                                "dense_sift": use_dense,
-                                                "dense_step": dense_step,
-                                                "dense_scales": dense_scales,
-                                                "spatial_pyramid": spatial_pyramid_type,
-                                                "pyramid_levels": pyramid_level,
-                                                "pca_dim": pca_dim,
-                                                "params": clf_params,
-                                                "cv_accuracy": mean_cv_acc,
-                                                "cv_std": std_cv_acc,
-                                                "test_accuracy": test_acc
-                                            }
+                                                # Track best based on CV accuracy
+                                                if mean_cv_acc > best_acc:
+                                                    best_acc = mean_cv_acc
+                                                    best_config = {
+                                                        "classifier": classifier_name,
+                                                        "detector": detector_type,
+                                                        "codebook_size": codebook_size,
+                                                        "dense_sift": use_dense,
+                                                        "dense_step": dense_step,
+                                                        "dense_scales": dense_scales,
+                                                        "spatial_pyramid": spatial_pyramid_type,
+                                                        "pyramid_levels": pyramid_level,
+                                                        "pca_dim": pca_dim,
+                                                        "encoding_type": encoding_type,
+                                                        "scaler_type": scaler_type,
+                                                        "params": clf_params,
+                                                        "cv_accuracy": mean_cv_acc,
+                                                        "cv_std": std_cv_acc,
+                                                        "test_accuracy": test_acc
+                                                    }
 
-                                        wandb.finish()
+                                                wandb.finish()
 
     # If count_only mode, print total and return
     if count_only:

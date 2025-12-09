@@ -65,3 +65,7 @@ WANDB_PROJECT = "BoVW-AdaBoost-Best"
 
 # CSV output filename for this experiment
 CSV_FILENAME = "adaboost_best_results.csv"
+
+# Feature encoding and scaling options
+SCALER_TYPES = [None]  # Can add: "l1", "l2", "standard"
+FEATURE_ENCODINGS = ["bovw"]  # Can add: "fisher"
