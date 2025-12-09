@@ -19,7 +19,6 @@ class HistIntersectionSVM(BaseEstimator, ClassifierMixin):
 
     @staticmethod
     def hist_intersection_kernel(X, Y, block_size=500):
-        """ Done by chunking so it does not explodes RAM."""
         N = X.shape[0]
         M = Y.shape[0]
         K = np.zeros((N, M), dtype=np.float32)
