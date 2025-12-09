@@ -11,10 +11,6 @@ import tqdm
 import wandb
 from bovw import BOVW
 from classifiers import create_classifier
-from parameters import (CLASSIFIER_PARAMETERS, CODEBOOK_SIZE, DENSE_SCALES,
-                        DENSE_STEP_SIZES, DETECTOR_PARAMETERS, PYRAMID_LEVELS,
-                        SELECTED_CLASSIFIER, SELECTED_DETECTOR,
-                        SPATIAL_PYRAMID_TYPES, USE_DENSE_SIFT, SCALER_TYPES, FEATURE_ENCODINGS)
 from PIL import Image
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import KFold
@@ -28,28 +24,22 @@ import hashlib
 
 
 def _get_descriptor_cache_dir(bovw):
-    """
-    Get cache directory for a specific descriptor configuration.
-    Only includes parameters that affect descriptor extraction, not histogram computation.
-    """
-    # Only cache based on what affects the actual descriptors
+    detector_kwargs = getattr(bovw, 'detector_kwargs', {})
+    detector_kwargs_str = '_'.join(f"{k}={v}" for k, v in sorted(detector_kwargs.items()))
+
     config_str = (
         f"{bovw.detector_type}_"
+        f"dkwargs{detector_kwargs_str}_"
         f"ds{bovw.dense_sift if hasattr(bovw, 'dense_sift') else False}_"
         f"step{bovw.dense_step if hasattr(bovw, 'dense_step') else 8}_"
         f"scales{bovw.dense_scales if hasattr(bovw, 'dense_scales') else [16]}"
     )
-    # Note: spatial_pyramid and pyramid_levels are NOT included because they don't affect descriptors
-    # They only affect how histograms are computed from descriptors
-
-    # Create a hash for the directory name
     config_hash = hashlib.md5(config_str.encode()).hexdigest()[:12]
     cache_dir = root / "cache" / f"descriptors_{config_hash}"
     return cache_dir
 
 
 def _serialize_keypoints(keypoints):
-    """Convert cv2.KeyPoint objects to serializable format"""
     if keypoints is None:
         return None
     return [{
@@ -63,7 +53,6 @@ def _serialize_keypoints(keypoints):
 
 
 def _deserialize_keypoints(kp_data_list):
-    """Convert serializable format back to cv2.KeyPoint objects"""
     if kp_data_list is None:
         return None
     return [cv2.KeyPoint(
@@ -78,17 +67,6 @@ def _deserialize_keypoints(kp_data_list):
 
 
 def precompute_descriptors(dataset, bovw):
-    """
-    Pre-compute and cache descriptors for all images in the dataset.
-    Each image's descriptor is saved as a separate pickle file.
-
-    Args:
-        dataset: List of (image, label) tuples
-        bovw: BOVW object for feature extraction
-
-    Returns:
-        cache_dir: Path to cache directory
-    """
     cache_dir = _get_descriptor_cache_dir(bovw)
     os.makedirs(cache_dir, exist_ok=True)
 
@@ -99,22 +77,19 @@ def precompute_descriptors(dataset, bovw):
     for idx in tqdm.tqdm(range(len(dataset)), desc="Pre-computing descriptors"):
         cache_file = cache_dir / f"image_{idx}.pkl"
 
-        # Skip if already cached
         if cache_file.exists():
             continue
 
         image, label = dataset[idx]
         keypoints, descriptors = bovw._extract_features(image=np.array(image))
 
-        # Serialize keypoints for pickling
         serialized_keypoints = _serialize_keypoints(keypoints)
 
-        # Save descriptor data
         cache_data = {
             'descriptors': descriptors,
             'keypoints': serialized_keypoints,
             'label': label,
-            'image': image if use_spatial else None  # Only save image if needed for spatial pyramid
+            'image': image if use_spatial else None 
         }
 
         with open(cache_file, 'wb') as f:
@@ -124,17 +99,6 @@ def precompute_descriptors(dataset, bovw):
 
 
 def load_descriptors_from_cache(dataset, bovw, indices=None):
-    """
-    Load descriptors from cache for specified indices.
-
-    Args:
-        dataset: Original dataset (for fallback)
-        bovw: BOVW object
-        indices: List of indices to load. If None, loads all.
-
-    Returns:
-        tuple: (all_descriptors, all_labels, all_keypoints, train_images)
-    """
     cache_dir = _get_descriptor_cache_dir(bovw)
     use_spatial = bovw.spatial_pyramid is not None
 
@@ -162,12 +126,10 @@ def load_descriptors_from_cache(dataset, bovw, indices=None):
             all_labels.append(cache_data['label'])
 
             if use_spatial:
-                # Deserialize keypoints
                 serialized_kp = cache_data['keypoints']
                 keypoints = _deserialize_keypoints(serialized_kp)
                 all_keypoints.append(keypoints)
 
-                # Load image from cache or dataset
                 if cache_data['image'] is not None:
                     train_images.append(cache_data['image'])
                 else:
@@ -176,7 +138,6 @@ def load_descriptors_from_cache(dataset, bovw, indices=None):
     return all_descriptors, all_labels, all_keypoints, train_images
 
 
-# Allow specifying which parameters file to use
 PARAMS_MODULE = sys.modules.get('__params__', None)
 if PARAMS_MODULE is None:
     from parameters import (
@@ -234,20 +195,7 @@ root = Path.cwd() / "Week1"
 
 def extract_bovw_histograms(bovw: Type[BOVW], descriptors: Literal["N", "T", "d"],
                             keypoints_list: list = None, images: list = None):
-    """
-    Extract BOVW histograms, with optional spatial pyramid support.
-
-    Args:
-        bovw: BOVW object
-        descriptors: List of descriptors for each image
-        keypoints_list: List of keypoints for each image (needed for spatial pyramids)
-        images: List of images (needed for spatial pyramids)
-
-    Returns:
-        Array of histograms
-    """
     if bovw.spatial_pyramid and keypoints_list is not None and images is not None:
-        # Use spatial pyramid
         histograms = []
         for img, kps, descs in zip(images, keypoints_list, descriptors):
             hist = bovw._compute_spatial_pyramid_descriptor(
@@ -259,7 +207,6 @@ def extract_bovw_histograms(bovw: Type[BOVW], descriptors: Literal["N", "T", "d"
             histograms.append(hist)
         return np.array(histograms)
     else:
-        # Regular BOVW without spatial pyramid
         return np.array([bovw._compute_codebook_descriptor(descriptors=descriptor, kmeans=bovw.codebook_algo) for descriptor in descriptors])
 
 
@@ -313,7 +260,6 @@ def train(dataset: List[Tuple[Image.Image, int]],
 
     use_spatial = bovw.spatial_pyramid is not None
 
-    # Load descriptors from cache
     all_descriptors, all_labels, all_keypoints, train_images = load_descriptors_from_cache(
         dataset=dataset,
         bovw=bovw,
@@ -340,7 +286,6 @@ def train(dataset: List[Tuple[Image.Image, int]],
     else:
         raise ValueError(f"Unknown encoding_type: {encoding_type}")
 
-    # Apply PCA if dimensionality reduction is requested
     pca = None
     if pca_dim is not None:
         print(f"Applying PCA: {features.shape[1]} -> {pca_dim} dimensions")
@@ -348,7 +293,6 @@ def train(dataset: List[Tuple[Image.Image, int]],
         features = pca.fit_transform(features)
         print(f"PCA explained variance ratio: {pca.explained_variance_ratio_.sum():.4f}")
 
-    # Apply scaler if requested
     if scaler_type == "standard":
         scaler = StandardScaler()
         features = scaler.fit_transform(features)
@@ -374,12 +318,6 @@ def train(dataset: List[Tuple[Image.Image, int]],
 
 def extract_test_accuracy(bovw, classifier, dataset, dataset_indices=None, pca=None,
                           scaler=None, fv_encoder=None, encoding_type="bovw"):
-    """
-    Compute BoVW histograms and accuracy on test set.
-    Can use cached descriptors if dataset_indices is provided.
-    Applies PCA transformation if pca is provided.
-    """
-    # If indices provided, try to use cache
     if dataset_indices is not None:
         try:
             descriptors_list, labels, keypoints_list, images_list = load_descriptors_from_cache(
@@ -388,10 +326,8 @@ def extract_test_accuracy(bovw, classifier, dataset, dataset_indices=None, pca=N
                 indices=dataset_indices
             )
         except FileNotFoundError:
-            # Fall back to extracting features
             dataset_indices = None
 
-    # Extract features if no cache
     if dataset_indices is None:
         use_spatial = bovw.spatial_pyramid is not None
         descriptors_list = []
@@ -420,11 +356,9 @@ def extract_test_accuracy(bovw, classifier, dataset, dataset_indices=None, pca=N
     else:
         raise ValueError(f"Unknown encoding_type: {encoding_type}")
 
-    # Apply PCA transformation if provided
     if pca is not None:
         histograms = pca.transform(histograms)
 
-    # Apply scaler if provided
     if scaler is not None:
         histograms = scaler.transform(histograms)
 
@@ -433,64 +367,35 @@ def extract_test_accuracy(bovw, classifier, dataset, dataset_indices=None, pca=N
     return acc
 
 def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only=False):
-    """
-    Full grid search over:
-    - detector types (SIFT, Dense SIFT, AKAZE, ORB)
-    - classifier types
-    - classifier hyperparameters
-    - codebook sizes
-    - spatial pyramid configurations
-    - dense SIFT configurations
-    - encoding types (BoVW, Fisher)
-    - scaler types
-    - PCA dimensions
-    Uses k-fold cross-validation on the training data.
-    And logs everything to W&B.
-
-    Args:
-        train_data: Training dataset
-        test_data: Test dataset for final evaluation
-        n_folds: Number of folds for cross-validation (default: 5)
-        config_indices: List of configuration indices to run (None = run all)
-        count_only: If True, only count and print total configurations, then exit
-    """
 
     best_acc = -1
     best_config = None
-    run_index = -1  # Will be incremented before use
+    run_index = -1
 
-    # Initialize CSV file for results
     csv_file = root / "results" / CSV_FILENAME
     os.makedirs(root / "results", exist_ok=True)
 
-    # Create CSV header
     csv_headers = [
         "run_id", "classifier", "detector", "codebook_size", "spatial_pyramid", "pyramid_levels",
         "dense_sift", "dense_step", "dense_scales", "pca_dim", "encoding_type", "scaler_type"
     ]
-    # Add headers for each fold
     for fold_idx in range(1, n_folds + 1):
         csv_headers.extend([f"fold_{fold_idx}_train_acc", f"fold_{fold_idx}_val_acc"])
-    # Add summary headers
     csv_headers.extend([
         "mean_train_acc", "std_train_acc", "mean_val_acc", "std_val_acc",
         "final_train_acc", "test_acc", "pca_explained_variance"
     ])
-    # Add classifier params
     csv_headers.append("clf_params")
 
-    # Write CSV header only if file doesn't exist
     file_exists = csv_file.exists()
     if not file_exists:
         with open(csv_file, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=csv_headers)
             writer.writeheader()
 
-    # Ensure SELECTED_DETECTOR and USE_DENSE_SIFT are lists
     detector_list = SELECTED_DETECTOR if isinstance(SELECTED_DETECTOR, list) else [SELECTED_DETECTOR]
     dense_sift_list = USE_DENSE_SIFT if isinstance(USE_DENSE_SIFT, list) else [USE_DENSE_SIFT]
 
-    # They should have the same length
     assert len(detector_list) == len(dense_sift_list), \
         "SELECTED_DETECTOR and USE_DENSE_SIFT must have the same length"
 
@@ -502,27 +407,18 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
 
         for encoding_type in FEATURE_ENCODINGS:
             for codebook_size in CODEBOOK_SIZE:
-                # Iterate over detector/dense_sift pairs
                 for detector_type, use_dense in zip(detector_list, dense_sift_list):
-                    # Get actual detector type (SIFT/AKAZE/ORB)
                     actual_detector_type = DETECTOR_TYPE_MAP.get(detector_type, detector_type) if DETECTOR_TYPE_MAP else detector_type
 
-                    # Only iterate dense parameters if using dense SIFT with SIFT detector
-                    if use_dense and actual_detector_type == "SIFT":
-                        dense_step_range = DENSE_STEP_SIZES
-                        dense_scales_range = DENSE_SCALES
-                    else:
-                        dense_step_range = [8]  # Default value (won't be used)
-                        dense_scales_range = [[16]]  # Default value (won't be used)
+                    dense_step_range = DENSE_STEP_SIZES
+                    dense_scales_range = DENSE_SCALES
 
                     for dense_step in dense_step_range:
                         for dense_scales in dense_scales_range:
-                            # Skip dense iterations if not using dense SIFT
                             if not use_dense and (dense_step != dense_step_range[0] or dense_scales != dense_scales_range[0]):
                                 continue
 
                             for spatial_pyramid_type in SPATIAL_PYRAMID_TYPES:
-                                # Only iterate over pyramid levels if we have a spatial pyramid type
                                 pyramid_level_range = PYRAMID_LEVELS if spatial_pyramid_type else [1]
 
                                 for pyramid_level in pyramid_level_range:
@@ -532,15 +428,12 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                                 clf_params = dict(zip(param_names, param_tuple))
                                                 run_index += 1
 
-                                                # If counting only, just increment and continue
                                                 if count_only:
                                                     continue
 
-                                                # Skip if config_indices specified and this index not in list
                                                 if config_indices is not None and run_index not in config_indices:
                                                     continue
 
-                                                # Create descriptive run name
                                                 detector_name = f"Dense-SIFT" if use_dense and actual_detector_type == "SIFT" else actual_detector_type
                                                 pyramid_str = f"_pyr-{spatial_pyramid_type}-L{pyramid_level}" if spatial_pyramid_type else ""
                                                 pca_str = f"_pca{pca_dim}" if pca_dim else ""
@@ -548,16 +441,13 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                                 encoding_str = f"_{encoding_type}"
                                                 run_name = f"{detector_name}_k{codebook_size}_{classifier_name}{pyramid_str}{pca_str}{scaler_str}{encoding_str}"
 
-                                                print("\n------------")
                                                 print(f" RUN {run_index}: {run_name}")
                                                 print(f" Detector={detector_type}, Dense SIFT: {use_dense}, step: {dense_step}, scales: {dense_scales}")
                                                 print(f" Spatial pyramid: {spatial_pyramid_type}, levels: {pyramid_level}")
                                                 print(f" Encoding: {encoding_type}, Scaler: {scaler_type}")
                                                 print(f" PCA dimensions: {pca_dim if pca_dim else 'None'}")
                                                 print(f" params={clf_params}")
-                                                print("-------------")
 
-                                                # Create BOVW for descriptor extraction
                                                 bovw_for_descriptors = BOVW(
                                                     detector_type=actual_detector_type,
                                                     codebook_size=int(codebook_size),
@@ -569,7 +459,6 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                                     dense_scales=dense_scales
                                                 )
 
-                                                # PRE-COMPUTE descriptors for the entire training dataset
                                                 print("\nPre-computing descriptors for all training images...")
                                                 precompute_descriptors(train_data, bovw_for_descriptors)
 
@@ -596,7 +485,6 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                                     }
                                                 )
 
-                                                # Perform k-fold cross-validation
                                                 kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
                                                 fold_accuracies = []
                                                 fold_train_accuracies = []
@@ -605,7 +493,6 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                                 for fold_idx, (train_idx, val_idx) in enumerate(kf.split(train_data)):
                                                     print(f"\n  Fold {fold_idx + 1}/{n_folds}")
 
-                                                    # Build BoVW for this fold
                                                     bovw = BOVW(
                                                         detector_type=actual_detector_type,
                                                         codebook_size=int(codebook_size),
@@ -617,7 +504,6 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                                         dense_scales=dense_scales
                                                     )
 
-                                                    # Train on fold - pass INDICES, not subset of data
                                                     bovw, classifier, train_acc, fold_pca, fold_scaler, fold_fv = train(
                                                         dataset=train_data,  # Pass full dataset
                                                         bovw=bovw,
@@ -629,11 +515,9 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                                         scaler_type=scaler_type
                                                     )
 
-                                                    # Track PCA explained variance if PCA was used
                                                     if fold_pca is not None:
                                                         fold_pca_variances.append(fold_pca.explained_variance_ratio_.sum())
 
-                                                    # Evaluate on validation fold using cached descriptors
                                                     fold_acc = extract_test_accuracy(
                                                         bovw=bovw,
                                                         classifier=classifier,
@@ -653,7 +537,6 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                                         f"fold_{fold_idx + 1}_val_accuracy": fold_acc
                                                     })
 
-                                                # Calculate mean CV accuracy
                                                 mean_cv_acc = np.mean(fold_accuracies)
                                                 std_cv_acc = np.std(fold_accuracies)
                                                 mean_train_acc = np.mean(fold_train_accuracies)
@@ -665,7 +548,6 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                                 if mean_pca_variance:
                                                     print(f"Mean PCA explained variance: {mean_pca_variance:.4f}")
 
-                                                # Train on full training set and evaluate on test set
                                                 print("\nTraining on full training set...")
                                                 bovw_final = BOVW(
                                                     detector_type=actual_detector_type,
@@ -708,7 +590,6 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
 
                                                 print(f"Test set accuracy: {test_acc:.4f}")
 
-                                                # Write results to CSV
                                                 csv_row = {
                                                     "run_id": run_index,
                                                     "classifier": classifier_name,
@@ -731,7 +612,6 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                                     "pca_explained_variance": mean_pca_variance if mean_pca_variance else "N/A",
                                                     "clf_params": str(clf_params)
                                                 }
-                                                # Add fold accuracies
                                                 for fold_idx in range(n_folds):
                                                     csv_row[f"fold_{fold_idx + 1}_train_acc"] = fold_train_accuracies[fold_idx]
                                                     csv_row[f"fold_{fold_idx + 1}_val_acc"] = fold_accuracies[fold_idx]
@@ -740,7 +620,6 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
                                                     writer = csv.DictWriter(f, fieldnames=csv_headers)
                                                     writer.writerow(csv_row)
 
-                                                # Track best based on CV accuracy
                                                 if mean_cv_acc > best_acc:
                                                     best_acc = mean_cv_acc
                                                     best_config = {
@@ -763,7 +642,6 @@ def gridsearch(train_data, test_data, n_folds=5, config_indices=None, count_only
 
                                                 wandb.finish()
 
-    # If count_only mode, print total and return
     if count_only:
         total_configs = run_index + 1
         print(f"\nTotal number of configurations: {total_configs}")

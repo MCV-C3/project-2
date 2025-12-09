@@ -13,7 +13,6 @@ os.environ['OPENCV_NUM_THREADS'] = '2'
 import argparse
 from typing import *
 
-from grid_search import gridsearch
 from PIL import Image
 import glob
 
