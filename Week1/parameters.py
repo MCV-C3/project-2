@@ -1,77 +1,67 @@
 import numpy as np
 
-# Classifier parameters
+# AdaBoost Best Single Configuration
+# Based on ensemble learning best practices for BoVW
+# Using SIFT with spatial pyramid (best configuration from previous experiments)
+# Codebook size: 1000, Spatial pyramid: square 2x2
+
+# Research Question: Can a well-tuned AdaBoost ensemble improve over single classifiers?
+
+# Baseline configuration
+CODEBOOK_SIZE_BASELINE = 1000
+
+# No PCA - use full feature representation
+PCA_DIMENSIONS = [None]
+
+# Single best AdaBoost configuration
+# Using:
+# - 200 estimators: enough to build strong ensemble without overfitting
+# - learning_rate 1.0: standard rate, balances speed and performance
+# - max_depth 3: shallow trees are good weak learners (not too weak, not too strong)
+#   depth=1 (stumps) might be too weak for complex BoVW features
+#   depth=3 gives trees enough capacity to learn useful patterns
 CLASSIFIER_PARAMETERS = {
-    "LogisticRegression": {
-        "class_weight": ["balanced"],  # Handle class imbalance
-    },
-
-    "SVM": {
-        "kernel": ["linear"],
-        "C": [0.01, 0.1, 1.0],
-        "class_weight": ["balanced"]
-    },
-
-    "HistIntersectionSVM": {
-        "C": np.linspace(0.001, 1.0, 50)
+    "AdaBoost": {
+        "n_estimators": [200],
+        "learning_rate": [1.0],
+        "base_estimator": ["DecisionTree"],
+        "base_estimator_params": [{"max_depth": 3, "random_state": 42}],
     }
 }
 
-SELECTED_CLASSIFIER = ["LogisticRegression"] # Selected Classifier
+SELECTED_CLASSIFIER = ["AdaBoost"]
 
-
-# Detector parameters
+# Detector parameters - SIFT with standard configuration
 DETECTOR_PARAMETERS = {
     "SIFT": {
-        "nfeatures": 0,  # 0 = unlimited features (standard SIFT default)
-    },
-
-    "AKAZE": {
-        "descriptor_type": 5,  # MLDB (Modified-Local Difference Binary) - most robust
-        "descriptor_size": 0,  # Full size descriptor (best quality)
-        "descriptor_channels": 3,  # 3 channels for better discrimination
-        "threshold": 0.001,  # Sensitive threshold for more features
-        "nOctaves": 4,  # Standard pyramid octaves
-        "nOctaveLayers": 4  # Layers per octave
-    },
-
-    "ORB": {
-        "nfeatures": 1000,  # Good number of features for ORB
-        "scaleFactor": 1.2,  # Standard scale between pyramid levels
-        "nlevels": 8,  # Standard pyramid levels
-        "edgeThreshold": 31,  # Standard border size
-        "firstLevel": 0,  # Start from original image
-        "WTA_K": 2,  # 2 points for BRIEF descriptor (standard)
-        "patchSize": 31  # Standard patch size
+        "nfeatures": 0,  # Unlimited features (best from nfeatures experiment)
+        "contrastThreshold": 0.04,
+        "edgeThreshold": 10,
+        "sigma": 1.6
     }
 }
 
-# Run all four descriptor configurations for comparison
-SELECTED_DETECTOR = ["SIFT", ]
+DETECTOR_TYPE_MAP = {
+    "SIFT": "SIFT",
+}
 
+# Single detector configuration - Standard SIFT
+SELECTED_DETECTOR = ["SIFT"]
+USE_DENSE_SIFT = [False]
 
-# Codebook parameters
-CODEBOOK_SIZE = [300]  # Good vocabulary size for all descriptors
+# Fixed codebook size
+CODEBOOK_SIZE = [CODEBOOK_SIZE_BASELINE]
 
-
-# Spatial Pyramid parameters
+# Use spatial pyramid - square grid with 2 levels (2x2 = 4 cells)
 SPATIAL_PYRAMID_TYPES = ["square"]
-PYRAMID_LEVELS = [5]  # No spatial pyramid for fair comparison
+PYRAMID_LEVELS = [2]
 
+# Dense SIFT parameters - Not used
+DENSE_STEP_SIZES = [8]
+DENSE_SCALES = [[16]]
 
-# Dense SIFT parameters
-# First SIFT will use regular SIFT (False), second will use Dense SIFT (True)
-USE_DENSE_SIFT = [False, ]
-DENSE_STEP_SIZES = [8]  # Good step size for dense sampling
-DENSE_SCALES = [
-    [8, 16, 24, 32],  # Multi-scale: captures features at different scales
-]
+# W&B project name
+WANDB_PROJECT = "BoVW-AdaBoost-Best"
 
-# Dense SIFT Cache parameters
-USE_DENSE_CACHE = False  # Set to True to use pre-computed cache
-DENSE_CACHE_DIR = "cache/dense_sift"  # Cache directory
-
-# Cache building parameters (for build_dense_cache.py)
-# Extract at high density, then subsample for experiments
-CACHE_STEP = 4  # Dense grid for caching
-CACHE_SCALES = [8, 12, 16, 24, 32]  # All scales you might want to test
+# CSV output filename for this experiment
+CSV_FILENAME = "adaboost_best_results.csv"

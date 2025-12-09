@@ -13,7 +13,6 @@ import argparse
 from typing import *
 from PIL import Image
 import glob
-from grid_search import gridsearch
 
 
 def Dataset(ImageFolder:str = "data/MIT_split/train") -> List[Tuple[Type[Image.Image], int]]:
@@ -54,8 +53,17 @@ if __name__ == "__main__":
                         help='Count total number of configurations and exit')
     parser.add_argument('--n-folds', type=int, default=5,
                         help='Number of cross-validation folds (default: 5)')
+    parser.add_argument('--params', type=str, default='parameters',
+                        help='Name of parameters module to use (default: parameters)')
 
     args = parser.parse_args()
+
+    # Load custom parameters module if specified
+    if args.params != 'parameters':
+        import importlib
+        import sys
+        params_module = importlib.import_module(args.params)
+        sys.modules['__params__'] = params_module
 
     # Parse configuration indices if provided
     config_indices = None
@@ -67,6 +75,9 @@ if __name__ == "__main__":
                 config_indices.extend(range(start, end + 1))
             else:
                 config_indices.append(int(part))
+
+    # Import grid_search AFTER loading custom parameters
+    from grid_search import gridsearch
 
     data_train = Dataset(ImageFolder="./places_reduced/train")
     data_test = Dataset(ImageFolder="./places_reduced/val")
