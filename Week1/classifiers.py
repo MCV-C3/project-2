@@ -4,6 +4,8 @@ import numpy as np
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
+from sklearn.ensemble import AdaBoostClassifier
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.base import BaseEstimator, ClassifierMixin
 
 class HistIntersectionSVM(BaseEstimator, ClassifierMixin):
@@ -58,5 +60,23 @@ def create_classifier(name: str, **kwargs: Dict[str, Any]):
     if name == "HistIntersectionSVM":
         return HistIntersectionSVM(**kwargs)
 
+    if name == "AdaBoost":
+        # Extract base estimator parameters if provided
+        base_estimator_name = kwargs.pop("base_estimator", "DecisionTree")
+        base_estimator_params = kwargs.pop("base_estimator_params", {})
+
+        # Create base estimator
+        if base_estimator_name == "DecisionTree":
+            base_estimator = DecisionTreeClassifier(**base_estimator_params)
+        elif base_estimator_name == "SVM":
+            base_estimator = SVC(**base_estimator_params)
+        elif base_estimator_name == "LogisticRegression":
+            base_estimator = LogisticRegression(**base_estimator_params)
+        else:
+            raise ValueError(f"Unknown base estimator: {base_estimator_name}")
+
+        # Create AdaBoost with the base estimator
+        return AdaBoostClassifier(estimator=base_estimator, **kwargs)
+
     raise ValueError("Unknown classifier name: "
-                     f"{name}. Should be 'logreg', 'linear', 'rbf' or 'hist'.")
+                     f"{name}. Should be 'LogisticRegression', 'SVM', 'HistIntersectionSVM', or 'AdaBoost'.")

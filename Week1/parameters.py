@@ -1,71 +1,59 @@
 import numpy as np
 
-# AdaBoost Best Single Configuration
-# Based on ensemble learning best practices for BoVW
-# Using SIFT with spatial pyramid (best configuration from previous experiments)
-# Codebook size: 1000, Spatial pyramid: square 2x2
-
-# Research Question: Can a well-tuned AdaBoost ensemble improve over single classifiers?
+# Test Configuration: Dense SIFT Step Size Test
+# Research Question: How does the step size affect dense SIFT performance with fixed scale?
 
 # Baseline configuration
-CODEBOOK_SIZE_BASELINE = 1000
+CODEBOOK_SIZE_BASELINE = 512
 
-# No PCA - use full feature representation
+# No PCA
 PCA_DIMENSIONS = [None]
 
-# Single best AdaBoost configuration
-# Using:
-# - 200 estimators: enough to build strong ensemble without overfitting
-# - learning_rate 1.0: standard rate, balances speed and performance
-# - max_depth 3: shallow trees are good weak learners (not too weak, not too strong)
-#   depth=1 (stumps) might be too weak for complex BoVW features
-#   depth=3 gives trees enough capacity to learn useful patterns
+# Logistic Regression classifier
 CLASSIFIER_PARAMETERS = {
-    "AdaBoost": {
-        "n_estimators": [200],
-        "learning_rate": [1.0],
-        "base_estimator": ["DecisionTree"],
-        "base_estimator_params": [{"max_depth": 3, "random_state": 42}],
+    "LogisticRegression": {
+        "C": [1.0],
+        "max_iter": [1000],
+        "solver": ["lbfgs"],
     }
 }
 
-SELECTED_CLASSIFIER = ["AdaBoost"]
+SELECTED_CLASSIFIER = ["LogisticRegression"]
 
-# Detector parameters - SIFT with standard configuration
+# Fixed SIFT detector (dense SIFT will be enabled)
+DETECTOR_TYPE_MAP = {"SIFT": "SIFT"}
+SELECTED_DETECTOR = ["SIFT"]
 DETECTOR_PARAMETERS = {
     "SIFT": {
-        "nfeatures": 0,  # Unlimited features (best from nfeatures experiment)
+        "nfeatures": 0,
         "contrastThreshold": 0.04,
         "edgeThreshold": 10,
         "sigma": 1.6
     }
 }
 
-DETECTOR_TYPE_MAP = {
-    "SIFT": "SIFT",
-}
-
-# Single detector configuration - Standard SIFT
-SELECTED_DETECTOR = ["SIFT"]
-USE_DENSE_SIFT = [False]
+# Enable dense SIFT
+USE_DENSE_SIFT = [True]
 
 # Fixed codebook size
 CODEBOOK_SIZE = [CODEBOOK_SIZE_BASELINE]
 
-# Use spatial pyramid - square grid with 2 levels (2x2 = 4 cells)
-SPATIAL_PYRAMID_TYPES = ["square"]
-PYRAMID_LEVELS = [2]
+# No spatial pyramid
+SPATIAL_PYRAMID_TYPES = [None]
+PYRAMID_LEVELS = [1]
 
-# Dense SIFT parameters - Not used
-DENSE_STEP_SIZES = [8]
-DENSE_SCALES = [[16]]
+# TEST: Dense SIFT step sizes with fixed scale
+DENSE_STEP_SIZES = [2, 4, 6, 10, 16, 24, 32]
+DENSE_SCALES = [[16]]  # Fixed scale
+
+# Single encoding and scaler for consistent comparison
+FEATURE_ENCODINGS = ["bovw"]
+SCALER_TYPES = ["none"]
+
+# This creates 10 step sizes × 1 encoding × 1 scaler × 1 classifier = 10 configurations total
 
 # W&B project name
-WANDB_PROJECT = "BoVW-AdaBoost-Best"
+WANDB_PROJECT = "Dense-SIFT-Step-Test"
 
 # CSV output filename for this experiment
-CSV_FILENAME = "adaboost_best_results.csv"
-
-# Feature encoding and scaling options
-SCALER_TYPES = [None]  # Can add: "l1", "l2", "standard"
-FEATURE_ENCODINGS = ["bovw"]  # Can add: "fisher"
+CSV_FILENAME = "dense_sift_step_test_results.csv"

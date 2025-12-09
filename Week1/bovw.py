@@ -14,6 +14,7 @@ class BOVW():
                  spatial_pyramid=None, pyramid_levels=1, dense_sift=False, dense_step=8, dense_scales=[8, 16, 24, 32],
                  use_dense_cache=False, dense_cache_dir="cache/dense_sift"):
         self.detector_type = detector_type
+        self.detector_kwargs = detector_kwargs  # Store detector_kwargs for cache key generation
         if self.detector_type == 'SIFT':
             self.detector = cv2.SIFT_create(**detector_kwargs)
         elif self.detector_type == 'AKAZE':
@@ -26,45 +27,28 @@ class BOVW():
         self.codebook_size = codebook_size
         self.codebook_algo = MiniBatchKMeans(n_clusters=self.codebook_size, **codebook_kwargs)
 
-        # Spatial pyramid parameters
         self.spatial_pyramid = spatial_pyramid
         self.pyramid_levels = pyramid_levels
 
-        # Dense SIFT parameters
         self.dense_sift = dense_sift
         self.dense_step = dense_step
         self.dense_scales = dense_scales if isinstance(dense_scales, list) else [dense_scales]
 
-        # Cache parameters
         self.use_dense_cache = use_dense_cache
         self.dense_cache_dir = dense_cache_dir
         self._dense_cache = None
 
-        # Initialize cache if needed
         if self.use_dense_cache and self.dense_sift and self.detector_type == 'SIFT':
             from dense_cache import DenseSIFTCache
             self._dense_cache = DenseSIFTCache(self.dense_cache_dir)
 
 
-    ## Modify this function in order to be able to create a dense sift
     def _extract_features(self, image: Literal["H", "W", "C"], image_id: str = None) -> Tuple:
-        """
-        Extract features from image.
-
-        Args:
-            image: Input image
-            image_id: Optional image identifier for cache lookup
-
-        Returns:
-            keypoints, descriptors
-        """
         if self.dense_sift and self.detector_type == 'SIFT':
-            # Try to load from cache first
             if self.use_dense_cache and self._dense_cache is not None and image_id is not None:
                 try:
                     return self._extract_from_cache(image_id)
                 except (FileNotFoundError, ValueError) as e:
-                    # Cache miss or incompatible parameters, fall back to extraction
                     print(f"Cache miss for {image_id}, extracting: {e}")
                     pass
 
@@ -73,19 +57,9 @@ class BOVW():
             return self.detector.detectAndCompute(image, None)
 
     def _extract_from_cache(self, image_id: str) -> Tuple:
-        """
-        Load descriptors from cache with subsampling.
-
-        Args:
-            image_id: Image identifier
-
-        Returns:
-            keypoints, descriptors
-        """
         if self._dense_cache is None:
             raise ValueError("Cache not initialized")
 
-        # Load and subsample
         keypoints, descriptors = self._dense_cache.load_and_subsample(
             image_id=image_id,
             target_step=self.dense_step,
@@ -95,16 +69,6 @@ class BOVW():
         return keypoints, descriptors
 
     def _extract_dense_sift(self, image: np.ndarray) -> Tuple:
-        """
-        Extract dense SIFT features at regular grid positions with multiple scales.
-
-        Args:
-            image: Input image (H, W, C)
-
-        Returns:
-            keypoints: List of cv2.KeyPoint objects
-            descriptors: Array of SIFT descriptors
-        """
         if len(image.shape) == 3:
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         else:
@@ -113,18 +77,14 @@ class BOVW():
         height, width = gray.shape
         keypoints = []
 
-        # Create dense grid of keypoints at multiple scales
         for scale in self.dense_scales:
-            # Generate grid positions
             for y in range(0, height - scale, self.dense_step):
                 for x in range(0, width - scale, self.dense_step):
-                    # Create keypoint at grid position with specific scale
                     kp = cv2.KeyPoint(x=float(x + scale // 2),
                                      y=float(y + scale // 2),
                                      size=float(scale))
                     keypoints.append(kp)
 
-        # Compute SIFT descriptors at the dense keypoints
         if len(keypoints) > 0:
             _, descriptors = self.detector.compute(gray, keypoints)
             if descriptors is not None:
@@ -159,73 +119,50 @@ class BOVW():
 
     def _compute_spatial_pyramid_descriptor(self, image: np.ndarray, keypoints: list,
                                            descriptors: np.ndarray, kmeans: Type[KMeans]) -> np.ndarray:
-        """
-        Compute spatial pyramid representation of the image.
-
-        Args:
-            image: Input image array
-            keypoints: List of keypoints
-            descriptors: Descriptors array
-            kmeans: Trained K-means model
-
-        Returns:
-            Concatenated histogram from all pyramid levels
-        """
         height, width = image.shape[:2]
         all_histograms = []
 
-        # Get visual words for all descriptors
         visual_words = kmeans.predict(descriptors)
 
-        # Create keypoint coordinates array
         kp_coords = np.array([[kp.pt[0], kp.pt[1]] for kp in keypoints])
 
         if self.spatial_pyramid == 'horizontal':
-            # Divide image horizontally into strips
             strip_height = height / self.pyramid_levels
             for i in range(self.pyramid_levels):
                 y_start = i * strip_height
                 y_end = (i + 1) * strip_height
 
-                # Find descriptors in this strip
                 mask = (kp_coords[:, 1] >= y_start) & (kp_coords[:, 1] < y_end)
                 strip_words = visual_words[mask]
 
-                # Create histogram for this strip
                 hist = np.zeros(kmeans.n_clusters)
                 for word in strip_words:
                     hist[word] += 1
 
-                # Normalize
                 if np.linalg.norm(hist) > 0:
                     hist = hist / np.linalg.norm(hist)
 
                 all_histograms.append(hist)
 
         elif self.spatial_pyramid == 'vertical':
-            # Divide image vertically into strips
             strip_width = width / self.pyramid_levels
             for i in range(self.pyramid_levels):
                 x_start = i * strip_width
                 x_end = (i + 1) * strip_width
 
-                # Find descriptors in this strip
                 mask = (kp_coords[:, 0] >= x_start) & (kp_coords[:, 0] < x_end)
                 strip_words = visual_words[mask]
 
-                # Create histogram for this strip
                 hist = np.zeros(kmeans.n_clusters)
                 for word in strip_words:
                     hist[word] += 1
 
-                # Normalize
                 if np.linalg.norm(hist) > 0:
                     hist = hist / np.linalg.norm(hist)
 
                 all_histograms.append(hist)
 
         elif self.spatial_pyramid == 'square':
-            # Divide image into square grid
             rows = cols = int(np.sqrt(self.pyramid_levels))
             if rows * cols < self.pyramid_levels:
                 rows += 1
@@ -243,23 +180,19 @@ class BOVW():
                     x_start = j * cell_width
                     x_end = (j + 1) * cell_width
 
-                    # Find descriptors in this cell
                     mask = ((kp_coords[:, 0] >= x_start) & (kp_coords[:, 0] < x_end) &
                            (kp_coords[:, 1] >= y_start) & (kp_coords[:, 1] < y_end))
                     cell_words = visual_words[mask]
 
-                    # Create histogram for this cell
                     hist = np.zeros(kmeans.n_clusters)
                     for word in cell_words:
                         hist[word] += 1
 
-                    # Normalize
                     if np.linalg.norm(hist) > 0:
                         hist = hist / np.linalg.norm(hist)
 
                     all_histograms.append(hist)
 
-        # Concatenate all histograms
         return np.concatenate(all_histograms)       
     
 
