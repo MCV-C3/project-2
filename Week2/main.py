@@ -139,8 +139,9 @@ if __name__ == "__main__":
     with open(r"C:\Users\maiol\Desktop\Master\C3\project-2\Week2\configs\NN1.yaml", "r") as f:
         cfg = yaml.safe_load(f)
 
+    #We need a first layer that maps the input features to our first input layer
     layers = cfg["layers"]
-    first_layer = [C*H*W, layers[0][0]]
+    first_layer = [C*H*W, layers[0][0]] 
     layers.insert(0,first_layer)
     model = models.DynamicMLP(
         layer_sizes=[tuple(x) for x in cfg["layers"]],
