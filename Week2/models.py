@@ -32,3 +32,27 @@ class SimpleModel(nn.Module):
         x = self.output_layer(x)
         
         return x
+
+class DynamicMLP(nn.Module):
+    def __init__(self, layer_sizes: list, activation: str = "ReLU"):
+        """
+        layer_sizes: list of tuples like [(in1, out1), (in2, out2), ...]
+        activation: string name of activation: "ReLU", "Tanh", "Sigmoid", etc.
+        """
+        super().__init__()
+
+        layers = []
+        act = getattr(nn, activation)()  # convert string → nn.Module()
+
+        for (inp, out) in layer_sizes:
+            layers.append(nn.Linear(inp, out))
+            layers.append(act)
+
+        # remove last activation if not desired
+        layers = layers[:-1]
+
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+        return self.model(x)

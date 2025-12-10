@@ -10,6 +10,8 @@ from models import SimpleModel
 import torchvision.transforms.v2  as F
 from torchviz import make_dot
 import tqdm
+import yaml
+import models
 
 # Train function
 def train(model, dataloader, criterion, optimizer, device):
@@ -124,8 +126,8 @@ if __name__ == "__main__":
                                     F.Resize(size=(224, 224)),
                                 ])
     
-    data_train = ImageFolder("~/data/Master/MIT_split/train", transform=transformation)
-    data_test = ImageFolder("~/data/Master/MIT_split/test", transform=transformation) 
+    data_train = ImageFolder(r"C:\Users\maiol\Desktop\Master\C3\places_reduced\train", transform=transformation)
+    data_test = ImageFolder(r"C:\Users\maiol\Desktop\Master\C3\places_reduced\val", transform=transformation) 
 
     train_loader = DataLoader(data_train, batch_size=256, pin_memory=True, shuffle=True, num_workers=8)
     test_loader = DataLoader(data_test, batch_size=128, pin_memory=True, shuffle=False, num_workers=8)
@@ -134,9 +136,19 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    with open(r"C:\Users\maiol\Desktop\Master\C3\project-2\Week2\configs\NN1.yaml", "r") as f:
+        cfg = yaml.safe_load(f)
 
-    model = SimpleModel(input_d=C*H*W, hidden_d=300, output_d=8)
-    plot_computational_graph(model, input_size=(1, C*H*W))  # Batch size of 1, input_dim=10
+    layers = cfg["layers"]
+    first_layer = [C*H*W, layers[0][0]]
+    layers.insert(0,first_layer)
+    model = models.DynamicMLP(
+        layer_sizes=[tuple(x) for x in cfg["layers"]],
+        activation=cfg["activation"]
+    )
+
+    #model = SimpleModel(input_d=C*H*W, hidden_d=300, output_d=8)
+    #plot_computational_graph(model, input_size=(1, C*H*W))  # Batch size of 1, input_dim=10
 
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
