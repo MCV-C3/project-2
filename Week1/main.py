@@ -1,74 +1,17 @@
-from bovw import BOVW
-
-from typing import *
-from PIL import Image
-
-import numpy as np
 import glob
-import tqdm
 import os
 
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
+os.environ['OMP_NUM_THREADS'] = '2'
+os.environ['MKL_NUM_THREADS'] = '2'
+os.environ['OPENBLAS_NUM_THREADS'] = '2'
+os.environ['NUMEXPR_NUM_THREADS'] = '2'
+os.environ['OPENCV_NUM_THREADS'] = '2'
 
+import argparse
+from typing import *
 
-
-
-def extract_bovw_histograms(bovw: Type[BOVW], descriptors: Literal["N", "T", "d"]):
-    return np.array([bovw._compute_codebook_descriptor(descriptors=descriptor, kmeans=bovw.codebook_algo) for descriptor in descriptors])
-
-
-def test(dataset: List[Tuple[Type[Image.Image], int]]
-         , bovw: Type[BOVW], 
-         classifier:Type[object]):
-    
-    test_descriptors = []
-    descriptors_labels = []
-    
-    for idx in tqdm.tqdm(range(len(dataset)), desc="Phase [Eval]: Extracting the descriptors"):
-        image, label = dataset[idx]
-        _, descriptors = bovw._extract_features(image=np.array(image))
-        
-        if descriptors is not None:
-            test_descriptors.append(descriptors)
-            descriptors_labels.append(label)
-            
-    
-    print("Computing the bovw histograms")
-    bovw_histograms = extract_bovw_histograms(descriptors=test_descriptors, bovw=bovw)
-    
-    print("predicting the values")
-    y_pred = classifier.predict(bovw_histograms)
-    
-    print("Accuracy on Phase[Test]:", accuracy_score(y_true=descriptors_labels, y_pred=y_pred))
-    
-
-def train(dataset: List[Tuple[Type[Image.Image], int]],
-           bovw:Type[BOVW]):
-    all_descriptors = []
-    all_labels = []
-    
-    for idx in tqdm.tqdm(range(len(dataset)), desc="Phase [Training]: Extracting the descriptors"):
-        
-        image, label = dataset[idx]
-        _, descriptors = bovw._extract_features(image=np.array(image))
-        
-        if descriptors  is not None:
-            all_descriptors.append(descriptors)
-            all_labels.append(label)
-            
-    print("Fitting the codebook")
-    kmeans, cluster_centers = bovw._update_fit_codebook(descriptors=all_descriptors)
-
-    print("Computing the bovw histograms")
-    bovw_histograms = extract_bovw_histograms(descriptors=all_descriptors, bovw=bovw) 
-    
-    print("Fitting the classifier")
-    classifier = LogisticRegression(class_weight="balanced").fit(bovw_histograms, all_labels)
-
-    print("Accuracy on Phase[Train]:", accuracy_score(y_true=all_labels, y_pred=classifier.predict(bovw_histograms)))
-    
-    return bovw, classifier
+from PIL import Image
+import glob
 
 
 def Dataset(ImageFolder:str = "data/MIT_split/train") -> List[Tuple[Type[Image.Image], int]]:
@@ -81,40 +24,75 @@ def Dataset(ImageFolder:str = "data/MIT_split/train") -> List[Tuple[Type[Image.I
         ImageFolder/<cls label>/xxx3.png
         ...
 
-        Example:
-            ImageFolder/cat/123.png
-            ImageFolder/cat/nsdf3.png
-            ImageFolder/cat/[...]/asd932_.png
-    
+    Example:
+        ImageFolder/cat/123.png
+        ImageFolder/cat/nsdf3.png
+        ImageFolder/cat/[...]/asd932_.png
+
     """
 
     map_classes = {clsi: idx for idx, clsi  in enumerate(os.listdir(ImageFolder))}
-    
     dataset :List[Tuple] = []
 
-    for idx, cls_folder in enumerate(os.listdir(ImageFolder)):
-
+    for _, cls_folder in enumerate(os.listdir(ImageFolder)):
         image_path = os.path.join(ImageFolder, cls_folder)
         images: List[str] = glob.glob(image_path+"/*.jpg")
         for img in images:
             img_pil = Image.open(img).convert("RGB")
-
             dataset.append((img_pil, map_classes[cls_folder]))
-
 
     return dataset
 
 
-    
-
-
 if __name__ == "__main__":
-     #/home/cboned/data/Master/MIT_split
-    data_train = Dataset(ImageFolder="./data/MIT_split/train")
-    data_test = Dataset(ImageFolder="./data/MIT_split/test") 
+    parser = argparse.ArgumentParser(description='Run BoVW grid search experiments')
+    parser.add_argument('--run', type=str, default=None,
+                        help='Comma-separated list of configuration indices to run (e.g., "0,2,3" or "1-4")')
+    parser.add_argument('--count-configs', action='store_true',
+                        help='Count total number of configurations and exit')
+    parser.add_argument('--n-folds', type=int, default=5,
+                        help='Number of cross-validation folds (default: 5)')
+    parser.add_argument('--params', type=str, default='parameters',
+                        help='Name of parameters module to use (default: parameters)')
 
-    bovw = BOVW()
-    
-    bovw, classifier = train(dataset=data_train, bovw=bovw)
-    
-    test(dataset=data_test, bovw=bovw, classifier=classifier)
+    args = parser.parse_args()
+
+    # Load custom parameters module if specified
+    if args.params != 'parameters':
+        import importlib
+        import sys
+        params_module = importlib.import_module(args.params)
+        sys.modules['__params__'] = params_module
+
+    # Parse configuration indices if provided
+    config_indices = None
+    if args.run:
+        config_indices = []
+        for part in args.run.split(','):
+            if '-' in part:
+                start, end = map(int, part.split('-'))
+                config_indices.extend(range(start, end + 1))
+            else:
+                config_indices.append(int(part))
+
+    # Import grid_search AFTER loading custom parameters
+    from grid_search import gridsearch
+
+    data_train = Dataset(ImageFolder="./places_reduced/train")
+    data_test = Dataset(ImageFolder="./places_reduced/val")
+
+    # Run grid search with k-fold cross-validation
+    best_config = gridsearch(
+        data_train,
+        data_test,
+        n_folds=args.n_folds,
+        config_indices=config_indices,
+        count_only=args.count_configs
+    )
+
+    if not args.count_configs:
+        print("\nBEST CONFIGURATION FOUND:")
+        print(best_config)
+
+
+
