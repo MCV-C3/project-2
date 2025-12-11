@@ -143,18 +143,19 @@ if __name__ == "__main__":
 
     with open(WEEK_2_ROOT / "configs" / "NN1.yaml", "r") as f:
         cfg = yaml.safe_load(f)
+        best_cfg = cfg["best"]
 
     #We need a first layer that maps the input features to our first input layer
-    layers = cfg["layers"]
+    layers = best_cfg["layers"]
     first_layer = [C*H*W, layers[0][0]] 
     layers.insert(0,first_layer)
     model = models.DynamicMLP(
-        layer_sizes=[tuple(x) for x in cfg["layers"]],
-        activation=cfg["activation"]
+        layer_sizes=[tuple(x) for x in best_cfg["layers"]],
+        activation=best_cfg["activation"]
     )
 
-    #model = SimpleModel(input_d=C*H*W, hidden_d=300, output_d=8)
-    #plot_computational_graph(model, input_size=(1, C*H*W))  # Batch size of 1, input_dim=10
+    model = SimpleModel(input_d=C*H*W, hidden_d=300, output_d=8)
+    plot_computational_graph(model, input_size=(1, C*H*W))  # Batch size of 1, input_dim=10
 
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
