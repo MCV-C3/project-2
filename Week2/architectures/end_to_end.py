@@ -8,8 +8,8 @@ import torchvision.transforms.v2  as F
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
 
-from main import train, test
-import models
+from Week2.main import train, test
+import Week2.models as models
 
 
 PROJECT_ROOT = Path.cwd()

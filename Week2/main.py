@@ -1,18 +1,20 @@
 from typing import *
-from torch.utils.data import DataLoader
-from torchvision.datasets import ImageFolder
+from pathlib import Path
+import tqdm
+import yaml
+
+import numpy as np
+import matplotlib.pyplot as plt
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
-import matplotlib.pyplot as plt
-from models import SimpleModel
+from torch.utils.data import DataLoader
+from torchvision.datasets import ImageFolder
 import torchvision.transforms.v2  as F
 from torchviz import make_dot
-import tqdm
-import yaml
-import models
-from pathlib import Path
+
+from Week2.models import SimpleModel, DynamicMLP
 
 
 PROJECT_ROOT = Path.cwd()
@@ -149,7 +151,7 @@ if __name__ == "__main__":
     layers = best_cfg["layers"]
     first_layer = [C*H*W, layers[0][0]] 
     layers.insert(0,first_layer)
-    model = models.DynamicMLP(
+    model = DynamicMLP(
         layer_sizes=[tuple(x) for x in best_cfg["layers"]],
         activation=best_cfg["activation"]
     )

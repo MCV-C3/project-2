@@ -1,0 +1,23 @@
+mlp_architectures:
+  - hidden_layers: [128, 64]
+    activation: ReLU
+
+  - hidden_layers: [256, 128, 64]
+    activation: ReLU
+
+  - hidden_layers: [64, 64, 64]
+    activation: Tanh
+
+
+classifiers:
+  - name: "SVM"
+    kernel: "linear"
+    C: 1.0
+
+  - name: "SVM"
+    kernel: "rbf"
+    C: 1.0
+    gamma: "scale"
+
+  - name: "HistIntersectionSVM"
+    C: 1.0
