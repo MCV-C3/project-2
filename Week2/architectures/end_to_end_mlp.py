@@ -56,6 +56,7 @@ def run_experiment(cfg, shape, train_loader, test_loader, device, num_epochs=5):
         "final_test_acc": test_accuracies[-1],
         "train_curve": train_accuracies,
         "test_curve": test_accuracies,
+        "model": model
     }
 
 
@@ -73,6 +74,9 @@ def grid_search(experiments, train_loader, test_loader, num_epochs):
         results.append(result)
       
     best_result = max(results, key=lambda x: x["final_test_acc"])
+    best_model = best_result["model"]
+    best_config = best_result["config"]
+    cfg["best"] = best_config
 
     print("Best model:")
     print(best_result["config"])
@@ -81,6 +85,14 @@ def grid_search(experiments, train_loader, test_loader, num_epochs):
     with open("grid_results.json", "w") as f:
         json.dump(results, f, indent=4)
         print("Saved results in file grid_results.json")
+
+    # save best model's weights and config
+    save_dir = WEEK_2_ROOT / "models"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(best_model.state_dict(), save_dir / "best_model.pth")
+
+    with open(WEEK_2_ROOT / "configs" / "NN1.yaml", "w") as f:
+        yaml.dump(cfg, f, sort_keys=False)
 
 if __name__=="__main__":
     with open(WEEK_2_ROOT / "configs" / "NN1.yaml", "r") as f:

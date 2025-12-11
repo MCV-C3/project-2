@@ -53,6 +53,16 @@ class DynamicMLP(nn.Module):
 
         self.model = nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x, return_features=False):
         x = x.view(x.size(0), -1)
-        return self.model(x)
+        features = []
+
+        for layer in self.model:
+            x = layer(x)
+            features.append(x)
+
+        if return_features:
+            return features   
+
+        return x
+
