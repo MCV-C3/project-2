@@ -12,6 +12,11 @@ from torchviz import make_dot
 import tqdm
 import yaml
 import models
+from pathlib import Path
+
+
+PROJECT_ROOT = Path.cwd()
+WEEK_2_ROOT = PROJECT_ROOT / "Week2"
 
 # Train function
 def train(model, dataloader, criterion, optimizer, device):
@@ -126,8 +131,8 @@ if __name__ == "__main__":
                                     F.Resize(size=(224, 224)),
                                 ])
     
-    data_train = ImageFolder(r"C:\Users\maiol\Desktop\Master\C3\places_reduced\train", transform=transformation)
-    data_test = ImageFolder(r"C:\Users\maiol\Desktop\Master\C3\places_reduced\val", transform=transformation) 
+    data_train = ImageFolder(PROJECT_ROOT / "data" / "places_reduced" / "train", transform=transformation)
+    data_test = ImageFolder(PROJECT_ROOT / "data" / "places_reduced" / "val", transform=transformation) 
 
     train_loader = DataLoader(data_train, batch_size=256, pin_memory=True, shuffle=True, num_workers=8)
     test_loader = DataLoader(data_test, batch_size=128, pin_memory=True, shuffle=False, num_workers=8)
@@ -136,7 +141,7 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    with open(r"C:\Users\maiol\Desktop\Master\C3\project-2\Week2\configs\NN1.yaml", "r") as f:
+    with open(WEEK_2_ROOT / "configs" / "NN1.yaml", "r") as f:
         cfg = yaml.safe_load(f)
 
     #We need a first layer that maps the input features to our first input layer
