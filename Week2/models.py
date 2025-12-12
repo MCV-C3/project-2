@@ -34,22 +34,27 @@ class SimpleModel(nn.Module):
         return x
 
 class DynamicMLP(nn.Module):
-    def __init__(self, layer_sizes: list, activation: str = "ReLU"):
+    def __init__(self, layer_sizes: list, activation: str = "ReLU", dropout: float = 0.0):
         """
         layer_sizes: list of tuples like [(in1, out1), (in2, out2), ...]
         activation: string name of activation: "ReLU", "Tanh", "Sigmoid", etc.
+        dropout: dropout probability (0.0 disables dropout)
         """
         super().__init__()
 
         layers = []
-        act = getattr(nn, activation)()  # convert string → nn.Module()
+        act_class = getattr(nn, activation)
+        drop = nn.Dropout(dropout) if dropout > 0 else None
 
-        for (inp, out) in layer_sizes:
+        for i, (inp, out) in enumerate(layer_sizes):
             layers.append(nn.Linear(inp, out))
-            layers.append(act)
 
-        # remove last activation if not desired
-        layers = layers[:-1]
+            # Don't add activation/dropout after last layer
+            if i < len(layer_sizes) - 1:
+                layers.append(act_class())
+
+                if drop is not None:
+                    layers.append(nn.Dropout(dropout))
 
         self.model = nn.Sequential(*layers)
 
@@ -62,7 +67,7 @@ class DynamicMLP(nn.Module):
             features.append(x)
 
         if return_features:
-            return features   
+            return features
 
         return x
 

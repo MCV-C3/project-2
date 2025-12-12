@@ -1,38 +1,50 @@
 experiments:
-  - 
-    layers:
-      - [3, 15]
-      - [15, 30]
-      - [30, 15]
-      - [15, 11]
-    activation: ReLU
-
-  - 
-    layers:
-      - [3, 50]
-      - [50, 20]
-      - [20, 11]
-    activation: ReLU
-
-  - 
-    layers:
-      - [3, 100]
-      - [100, 50]
-      - [50, 11]
-    activation: Tanh
-
-  - 
-    layers:
-      - [3, 200]
-      - [200, 11]
-    activation: ReLU
-
-
+- model:
+    layers: &id001
+    - - 3
+      - 15
+    - - 15
+      - 30
+    - - 30
+      - 15
+    - - 15
+      - 11
+    activation:
+    - ReLU
+    dropout:
+    - 0.3
+  pipeline:
+    batch_size:
+    - &id002
+      - 64
+      - 32
+    num_epochs:
+    - 1
+  optimizer:
+    type:
+    - SGD
+    lr:
+    - 1e-4
+    weight_decay:
+    - 0.0
+    momentum:
+    - 0.9
+    betas:
+    - - 0.5
+      - 0.5
+    nesterov:
+    - true
+resize:
+- - 224
+  - 224
 best:
-  layers:
-    - [3, 15]
-    - [15, 30]
-    - [30, 15]
-    - [15, 10]
-
-  activation: ReLU
+- *id001
+- *id002
+- 1
+- ReLU
+- 0.3
+- name: SGD
+  lr: 0.0001
+  momentum: 0.9
+  weight_decay: 0.0
+  nesterov: true
