@@ -1,21 +1,20 @@
-from typing import *
 from pathlib import Path
-import tqdm
-import yaml
+from typing import *
 
-import numpy as np
 import matplotlib.pyplot as plt
-
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchvision.transforms.v2 as F
+import tqdm
+import wandb
+import yaml
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
-import torchvision.transforms.v2  as F
 from torchviz import make_dot
 
-from Week2.models import SimpleModel, DynamicMLP
-
+from Week2.models import DynamicMLP, SimpleModel
 
 PROJECT_ROOT = Path.cwd()
 WEEK_2_ROOT = PROJECT_ROOT / "Week2"
@@ -46,6 +45,7 @@ def train(model, dataloader, criterion, optimizer, device):
 
     avg_loss = train_loss / total
     accuracy = correct / total
+    
     return avg_loss, accuracy
 
 
@@ -179,7 +179,13 @@ if __name__ == "__main__":
         print(f"Epoch {epoch + 1}/{num_epochs} - "
               f"Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}, "
               f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
-
+        wandb.log({
+            "epoch": epoch + 1,
+            "train/loss": train_loss,
+            "train/accuracy": train_accuracy,
+            "test/loss": test_loss,
+            "test/accuracy": test_accuracy
+        })
     # Plot results
     plot_metrics({"loss": train_losses, "accuracy": train_accuracies}, {"loss": test_losses, "accuracy": test_accuracies}, "loss")
     plot_metrics({"loss": train_losses, "accuracy": train_accuracies}, {"loss": test_losses, "accuracy": test_accuracies}, "accuracy")

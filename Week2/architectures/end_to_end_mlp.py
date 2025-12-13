@@ -1,22 +1,34 @@
-import yaml
 import json
+import os
+from datetime import datetime
 from pathlib import Path
+
+import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch
-import torchvision.transforms.v2  as F
-from torchvision.datasets import ImageFolder
+import torchvision.transforms.v2 as F
+import wandb
+import yaml
 from torch.utils.data import DataLoader
+from torchvision.datasets import ImageFolder
 
-from ..main import train, test
 import Week2.models as models
 
+from ..main import test, train
 
 PROJECT_ROOT = Path.cwd()
 WEEK_2_ROOT = PROJECT_ROOT / "Week2"
 
 torch.manual_seed(42)
 
+def save_results(results, results_path, timestamp):
+
+
+    os.makedirs(results_path, exist_ok=True)
+    output_path = os.path.join(results_path, timestamp+'.json')
+    with open(output_path, "w") as f:
+        json.dump(results, f, indent=4)
+        print("Saved results in file grid_results.json")
 
 def get_optimizer(optimizer, model_params, lr,
                   weight_decay=0.0, momentum=0.0, nesterov=False,
@@ -75,7 +87,27 @@ def get_optimizer(optimizer, model_params, lr,
     return optimizer_obj, optimizer_cfg
 
 
-def run_experiment(cfg, shape, train_loader, test_loader, device, optimizer_type, lr, wd, m, nesterov, activation, dropout, num_epochs=5):
+def run_experiment(cfg, shape, train_loader, test_loader, device, optimizer_type, lr, wd, m, nesterov, activation, dropout, num_epochs, timestamp):
+    wandb_run = wandb.init(
+        project="week2-mlp",
+        name=timestamp,
+        group="grid-search",
+        reinit=True,
+        config={
+            "layers": cfg["layers"],
+            "activation": activation,
+            "dropout": dropout,
+            "epochs": num_epochs,
+            "optimizer": optimizer_type,
+            "lr": float(lr),
+            "weight_decay": float(wd),
+            "momentum": float(m),
+            "nesterov": nesterov,
+            "batch_size": train_loader.batch_size,
+            "input_shape": shape,
+        }
+    )
+
     layers = cfg["layers"].copy()
     C, H, W = shape
 
@@ -115,20 +147,28 @@ def run_experiment(cfg, shape, train_loader, test_loader, device, optimizer_type
         print(f"Epoch {epoch + 1}/{num_epochs} - "
               f"Train Loss: {train_loss:.4f}, Train Accuracy: {train_acc:.4f}, "
               f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_acc:.4f}")
-
+        wandb.log({
+            "epoch": epoch + 1,
+            "train/loss": train_loss,
+            "train/accuracy": train_acc,
+            "test/loss": test_loss,
+            "test/accuracy": test_acc
+        })
     metrics = {
         "final_train_acc": train_accuracies[-1],
         "final_test_acc": test_accuracies[-1],
         "train_curve": train_accuracies,
         "test_curve": test_accuracies,
     }
+    wandb.finish()
 
     return metrics, model, optimizer_cfg
 
 
 def grid_search(experiments_models, data_train, data_test):
+    timestamp = datetime.now().strftime("%d%m%Y_%H%M")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    print(f'You are using {device}')
     results = []
     models = []
 
@@ -158,9 +198,19 @@ def grid_search(experiments_models, data_train, data_test):
                                             
                                             result, model, optimizer_cfg = run_experiment(model_params, shape, train_loader, test_loader, device, 
                                                                     optimizer, lr, wd, m, nesterov,
-                                                                    activation, dropout, epochs)
+                                                                    activation, dropout, epochs, timestamp)
                                             
-                                            result["config"] = [model_params['layers'], batch_size, epochs, activation, dropout, optimizer_cfg]  # store what config generated this result
+
+
+                                            result["config"] = {
+                                                "layers": model_params["layers"],
+                                                "batch_size": batch_size,
+                                                "epochs": epochs,
+                                                "activation": activation,
+                                                "dropout": dropout,
+                                                "optimizer": optimizer_cfg
+                                            }  # store what config generated this result
+
                                             results.append(result)
                                             models.append(model)
 
@@ -173,14 +223,11 @@ def grid_search(experiments_models, data_train, data_test):
     print(best_result["config"])
     print("Accuracy:", best_result["final_test_acc"])
 
-    with open("grid_results.json", "w") as f:
-        json.dump(results, f, indent=4)
-        print("Saved results in file grid_results.json")
-
+    save_results(results, os.path.join(WEEK_2_ROOT,"results"), timestamp)
     # save best model's weights and config
     save_dir = WEEK_2_ROOT / "models"
     save_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(best_model.state_dict(), save_dir / "best_model.pth")
+    torch.save(best_model.state_dict(), save_dir / f"{timestamp}_best_model.pth")
 
     with open(WEEK_2_ROOT / "configs" / "NN1.yaml", "w") as f:
         yaml.dump(cfg, f, sort_keys=False)

@@ -1,13 +1,11 @@
 experiments:
 - model:
     layers: &id001
-    - - 3
-      - 15
-    - - 15
-      - 30
-    - - 30
-      - 15
-    - - 15
+    - - 64
+      - 128
+    - - 128
+      - 64
+    - - 64
       - 11
     activation:
     - ReLU
@@ -35,16 +33,17 @@ experiments:
     nesterov:
     - true
 resize:
-- - 224
-  - 224
+- - 32
+  - 32
 best:
-- *id001
-- *id002
-- 1
-- ReLU
-- 0.3
-- name: SGD
-  lr: 0.0001
-  momentum: 0.9
-  weight_decay: 0.0
-  nesterov: true
+  layers: *id001
+  batch_size: *id002
+  epochs: 1
+  activation: ReLU
+  dropout: 0.3
+  optimizer:
+    name: SGD
+    lr: 0.0001
+    momentum: 0.9
+    weight_decay: 0.0
+    nesterov: true
