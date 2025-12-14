@@ -1,49 +1,43 @@
 experiments:
-- model:
-    layers: &id001
-    - - 64
-      - 128
-    - - 128
-      - 64
-    - - 64
-      - 11
-    activation:
-    - ReLU
-    dropout:
-    - 0.3
-  pipeline:
-    batch_size:
-    - &id002
-      - 64
-      - 32
-    num_epochs:
-    - 1
-  optimizer:
-    type:
-    - SGD
-    lr:
-    - 1e-4
-    weight_decay:
-    - 0.0
-    momentum:
-    - 0.9
-    betas:
-    - - 0.5
-      - 0.5
-    nesterov:
-    - true
-resize:
-- - 32
-  - 32
-best:
-  layers: *id001
-  batch_size: *id002
-  epochs: 1
-  activation: ReLU
-  dropout: 0.3
-  optimizer:
-    name: SGD
-    lr: 0.0001
-    momentum: 0.9
-    weight_decay: 0.0
-    nesterov: true
+  - model:
+      layers: &id001
+        - - 512
+          - 1024
+        - - 1024
+          - 2048
+        - - 2048
+          - 512
+        - - 512
+          - 128
+        - - 128
+          - 11
+      activation:
+        - ReLU
+      dropout:
+        - 0.3
+    pipeline:
+      batch_size:
+        - &id002
+          - 256
+          - 128
+      num_epochs:
+        - 50
+    optimizer:
+      type:
+        - SGD
+      lr:
+        - 1e-3
+      weight_decay:
+        - 1e-4
+      momentum:
+        - 0.9
+      betas:
+        - - 0.9
+          - 0.999
+      nesterov:
+        - true
+resize: 
+  - - 64
+    - 64
+
+data_augm: True

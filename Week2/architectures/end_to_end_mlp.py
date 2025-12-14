@@ -121,7 +121,7 @@ def run_experiment(cfg, shape, train_loader, test_loader, device, optimizer_type
         activation=activation,
         dropout=dropout
     ).to(device)
-
+    print("Model device:", next(model.parameters()).device)
     criterion = nn.CrossEntropyLoss()
     optimizer, optimizer_cfg = get_optimizer(
             optimizer=optimizer_type,
@@ -165,10 +165,9 @@ def run_experiment(cfg, shape, train_loader, test_loader, device, optimizer_type
     return metrics, model, optimizer_cfg
 
 
-def grid_search(experiments_models, data_train, data_test):
+def grid_search(experiments_models, data_train, data_test, resize_sizes, augmentation):
     timestamp = datetime.now().strftime("%d%m%Y_%H%M")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f'You are using {device}')
     results = []
     models = []
 
@@ -208,7 +207,9 @@ def grid_search(experiments_models, data_train, data_test):
                                                 "epochs": epochs,
                                                 "activation": activation,
                                                 "dropout": dropout,
-                                                "optimizer": optimizer_cfg
+                                                "optimizer": optimizer_cfg,
+                                                "img_size": resize_sizes,
+                                                "data_agmentation": augmentation
                                             }  # store what config generated this result
 
                                             results.append(result)
@@ -229,24 +230,39 @@ def grid_search(experiments_models, data_train, data_test):
     save_dir.mkdir(parents=True, exist_ok=True)
     torch.save(best_model.state_dict(), save_dir / f"{timestamp}_best_model.pth")
 
-    with open(WEEK_2_ROOT / "configs" / "NN1.yaml", "w") as f:
-        yaml.dump(cfg, f, sort_keys=False)
-
 if __name__=="__main__":
     with open(WEEK_2_ROOT / "configs" / "NN1.yaml", "r") as f:
+        print(WEEK_2_ROOT / "configs" / "NN1.yaml",)
         cfg = yaml.safe_load(f)
         experiments_models = cfg["experiments"]
         resize_sizes = cfg['resize']
-
+        augmentation = cfg['data_augm']
     for resize in resize_sizes:
-        transformation  = F.Compose([
+        if augmentation:
+            train_transform = F.Compose([
+                F.ToImage(),
+                F.ToDtype(torch.float32, scale=True),
+                F.Resize((resize[0], resize[1])),
+                F.RandomHorizontalFlip(p=0.5),
+                F.ColorJitter(brightness=0.2, contrast=0.2),
+            ])
+
+            test_transform = F.Compose([
+                F.ToImage(),
+                F.ToDtype(torch.float32, scale=True),
+                F.Resize((resize[0], resize[1])),
+            ])
+            data_train = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\train', transform=train_transform)
+            data_test = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\val', transform=test_transform)
+        else:
+            transformation  = F.Compose([
                                         F.ToImage(),
                                         F.ToDtype(torch.float32, scale=True),
                                         F.Resize(size=(resize[0], resize[1])),
                                     ])
         
-        data_train = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\train', transform=transformation)
-        data_test = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\val', transform=transformation) 
+            data_train = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\train', transform=transformation)
+            data_test = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\val', transform=transformation) 
 
-        grid_search(experiments_models, data_train, data_test)
+        grid_search(experiments_models, data_train, data_test, resize_sizes, augmentation)
 

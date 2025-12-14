@@ -47,14 +47,19 @@ class DynamicMLP(nn.Module):
         drop = nn.Dropout(dropout) if dropout > 0 else None
 
         for i, (inp, out) in enumerate(layer_sizes):
+            # Add linear layer
             layers.append(nn.Linear(inp, out))
-
-            # Don't add activation/dropout after last layer
+            
+            # Add BatchNorm after each linear layer (except last layer)
             if i < len(layer_sizes) - 1:
+                layers.append(nn.BatchNorm1d(out))
+            
+                # Apply activation after BatchNorm
                 layers.append(act_class())
 
+                # Add Dropout if needed
                 if drop is not None:
-                    layers.append(nn.Dropout(dropout))
+                    layers.append(drop)
 
         self.model = nn.Sequential(*layers)
 
@@ -70,4 +75,3 @@ class DynamicMLP(nn.Module):
             return features
 
         return x
-

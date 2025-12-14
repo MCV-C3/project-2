@@ -1,5 +1,5 @@
 import numpy as np
-import yaml
+import json
 from pathlib import Path
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score
@@ -7,29 +7,22 @@ import torch
 import torchvision.transforms.v2  as F
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
-
+from tqdm import tqdm
 import Week2.models as models
-
+from sklearn.metrics import accuracy_score, recall_score
 PROJECT_ROOT = Path.cwd()
 WEEK_2_ROOT = PROJECT_ROOT / "Week2"
 
 
-def reconstruct_best_model(train_loader):
+def reconstruct_best_model(train_loader, model_name, cfg):
     """
     Reconstruct the best model.
     """
-    with open(WEEK_2_ROOT / "configs" / "NN1.yaml", "r") as f:
-        cfg = yaml.safe_load(f)
-
-    best_cfg = cfg.get("best", None)
-    if best_cfg is None:
-        print("No 'best' configuration found in YAML. Run grid search first.")
-        return None
-    
+    cfg = cfg[0]
     images, _ = next(iter(train_loader))
     C, H, W = images[0].shape
 
-    layers = best_cfg["layers"].copy()
+    layers = cfg['config']["layers"].copy()
 
     # Ensure first layer exactly as it was in best modelx
     first_layer = [C*H*W, layers[0][0]]
@@ -38,10 +31,11 @@ def reconstruct_best_model(train_loader):
 
     model = models.DynamicMLP(
         layer_sizes=layer_sizes,
-        activation=best_cfg["activation"]
+        activation=cfg['config']["activation"],
+        dropout=cfg['config']['dropout']
     ).to(device)
 
-    weights_path = WEEK_2_ROOT / "models" / "best_model.pth"
+    weights_path = WEEK_2_ROOT / "models" / f"{model_name}_best_model.pth"
     try:
         model.load_state_dict(torch.load(weights_path, map_location=device))
         print(f"Loaded best model from: {weights_path}")
@@ -66,7 +60,7 @@ def extract_embeddings(model, dataloader, layer_idx, device):
     all_labels = []
 
     with torch.no_grad():
-        for imgs, labels in dataloader:
+        for imgs, labels in tqdm(dataloader, total=len(dataloader), desc='Extract Embeddings'):
             imgs = imgs.to(device)
 
             # Full list of layer outputs
@@ -83,9 +77,10 @@ def extract_embeddings(model, dataloader, layer_idx, device):
     return X, y
 
 
-def mlp_svm_experiment(model, train_loader, test_loader, device, layer_idx=-2):
+def mlp_svm_experiment(model, train_loader, test_loader, device, layer_idx=-3):
     """
     Train an SVM on embeddings extracted from a given MLP layer.
+    Prints training and test accuracy + recall.
     """
     print("Extracting embeddings")
     X_train, y_train = extract_embeddings(model, train_loader, layer_idx, device)
@@ -96,29 +91,69 @@ def mlp_svm_experiment(model, train_loader, test_loader, device, layer_idx=-2):
     svm.fit(X_train, y_train)
 
     print("Evaluating SVM")
-    preds = svm.predict(X_test)
-    acc = accuracy_score(y_test, preds)
 
-    print(f"SVM accuracy using layer {layer_idx}: {acc:.4f}")
-    return acc
+    # ---- Train metrics ----
+    train_preds = svm.predict(X_train)
+    train_acc = accuracy_score(y_train, train_preds)
+    train_recall = recall_score(y_train, train_preds, average="macro")
+
+    # ---- Test metrics ----
+    test_preds = svm.predict(X_test)
+    test_acc = accuracy_score(y_test, test_preds)
+    test_recall = recall_score(y_test, test_preds, average="macro")
+
+    print(f"SVM results using layer {layer_idx}:")
+    print(f"  Train Accuracy: {train_acc:.4f}")
+    print(f"  Train Recall:   {train_recall:.4f}")
+    print(f"  Test Accuracy:  {test_acc:.4f}")
+    print(f"  Test Recall:    {test_recall:.4f}")
+
+    return {
+        "train_acc": train_acc,
+        "train_recall": train_recall,
+        "test_acc": test_acc,
+        "test_recall": test_recall
+    }
 
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    transformation  = F.Compose([
-                                    F.ToImage(),
-                                    F.ToDtype(torch.float32, scale=True),
-                                    F.Resize(size=(224, 224)),
-                                ])
-    
-    data_train = ImageFolder(PROJECT_ROOT / "data" / "places_reduced" / "train", transform=transformation)
-    data_test = ImageFolder(PROJECT_ROOT / "data" / "places_reduced" / "val", transform=transformation) 
+    model_name = '14122025_1414'
+    with open(WEEK_2_ROOT / "results" / f"{model_name}.json", "r") as f:
+        cfg = json.load(f)
+    augmentation = cfg[0]['config']['data_agmentation']
+
+    if augmentation:
+            train_transform = F.Compose([
+                F.ToImage(),
+                F.ToDtype(torch.float32, scale=True),
+                F.Resize((cfg[0]['config']['img_size'][0][0], cfg[0]['config']['img_size'][0][1])),
+                F.RandomHorizontalFlip(p=0.5),
+                F.ColorJitter(brightness=0.2, contrast=0.2),
+            ])
+
+            test_transform = F.Compose([
+                F.ToImage(),
+                F.ToDtype(torch.float32, scale=True),
+                F.Resize((cfg[0]['config']['img_size'][0][0], cfg[0]['config']['img_size'][0][1])),
+            ])
+            data_train = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\train', transform=train_transform)
+            data_test = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\val', transform=test_transform)
+    else:
+            transformation  = F.Compose([
+                                        F.ToImage(),
+                                        F.ToDtype(torch.float32, scale=True),
+                                        F.Resize(size=(cfg[0]['config']['img_size'][0][0], cfg[0]['config']['img_size'][0][1])),
+                                    ])
+        
+            data_train = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\train', transform=transformation)
+            data_test = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\val', transform=transformation)    
 
     train_loader = DataLoader(data_train, batch_size=256, pin_memory=True, shuffle=True, num_workers=8)
     test_loader = DataLoader(data_test, batch_size=128, pin_memory=True, shuffle=False, num_workers=8)
     
 
-    model = reconstruct_best_model()
+    model = reconstruct_best_model(train_loader, model_name, cfg)
     layer_to_use = -2 # use last hidden layer of the MLP
 
     acc = mlp_svm_experiment(model, train_loader, test_loader, device, layer_idx=layer_to_use)
