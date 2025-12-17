@@ -4,6 +4,10 @@ import torch
 
 from typing import *
 
+class Swish(nn.Module):
+    def forward(self, x):
+        return x * torch.sigmoid(x)
+
 class SimpleModel(nn.Module):
 
     def __init__(self, input_d: int, hidden_d: int, output_d: int):
@@ -43,6 +47,7 @@ class DynamicMLP(nn.Module):
         super().__init__()
 
         layers = []
+        
         act_class = getattr(nn, activation)
         drop = nn.Dropout(dropout) if dropout > 0 else None
 
@@ -69,7 +74,9 @@ class DynamicMLP(nn.Module):
 
         for layer in self.model:
             x = layer(x)
-            features.append(x)
+            if isinstance(layer, (nn.ReLU, nn.SiLU)):
+                features.append(x)
+            
 
         if return_features:
             return features
