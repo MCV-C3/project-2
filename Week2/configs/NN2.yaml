@@ -1,13 +1,9 @@
 experiments:
   - model:
       layers: &id001
-        - - 512
-          - 1024
-        - - 1024
-          - 2048
-        - - 2048
-          - 512
-        - - 512
+        - - 128
+          - 256
+        - - 256
           - 128
         - - 128
           - 11
@@ -24,7 +20,7 @@ experiments:
         - 50
     optimizer:
       type:
-        - SGD
+        - AdamW
       lr:
         - 1e-3
       weight_decay:
@@ -37,7 +33,6 @@ experiments:
       nesterov:
         - true
 resize: 
-  - - 64
-    - 64
-
+  - - 16
+    - 16
 data_augm: True
