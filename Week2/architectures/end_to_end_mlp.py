@@ -134,7 +134,9 @@ def run_experiment(cfg, shape, train_loader, test_loader, device, optimizer_type
 
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
-
+    scheduler = torch.optim.lr_scheduler.StepLR(
+        optimizer, step_size=15, gamma=0.5
+    )
     for epoch in range(num_epochs):
         train_loss, train_acc = train(model, train_loader, criterion, optimizer, device)
         test_loss, test_acc = test(model, test_loader, criterion, device)
@@ -154,6 +156,7 @@ def run_experiment(cfg, shape, train_loader, test_loader, device, optimizer_type
             "test/loss": test_loss,
             "test/accuracy": test_acc
         })
+        scheduler.step()
     metrics = {
         "final_train_acc": train_accuracies[-1],
         "final_test_acc": test_accuracies[-1],

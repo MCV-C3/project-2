@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import Week2.models as models
 from sklearn.metrics import accuracy_score, recall_score
+import csv
+import os
 PROJECT_ROOT = Path.cwd()
 WEEK_2_ROOT = PROJECT_ROOT / "Week2"
 
@@ -58,7 +60,6 @@ def extract_embeddings(model, dataloader, layer_idx, device):
     model.eval()
     all_features = []
     all_labels = []
-
     with torch.no_grad():
         for imgs, labels in tqdm(dataloader, total=len(dataloader), desc='Extract Embeddings'):
             imgs = imgs.to(device)
@@ -77,36 +78,106 @@ def extract_embeddings(model, dataloader, layer_idx, device):
     return X, y
 
 
-def mlp_svm_experiment(model, train_loader, test_loader, device, layer_idx=-3):
+def mlp_svm_experiment(model, train_loader, test_loader, device, model_name):
     """
     Train an SVM on embeddings extracted from a given MLP layer.
     Prints training and test accuracy + recall.
     """
     print("Extracting embeddings")
-    X_train, y_train = extract_embeddings(model, train_loader, layer_idx, device)
-    X_test, y_test = extract_embeddings(model, test_loader, layer_idx, device)
+    #for i in range(0,5,1):
+    i=4
+    X_train, y_train = extract_embeddings(model, train_loader, i, device)
+    X_test, y_test = extract_embeddings(model, test_loader, i, device)
+    kernels = ["linear", "rbf"]
+    cs = [1e-2, 1e-1, 1, 10, 100]
+    gs = [1e-3, 1e-2, 1e-1, 1]
+    result_file = r"C:\Users\maiol\Desktop\Master\C3\project-2\Week2\results\svm\results_parameters.csv"
+    file_exists = os.path.isfile(result_file)
+    
+    with open(result_file, "a", newline="") as f:
+        writer = csv.writer(f)
 
-    print("Training SVM")
-    svm = SVC(kernel="linear", C=1.0)
-    svm.fit(X_train, y_train)
+        if not file_exists:
+            writer.writerow([
+                "model_name",
+                "layer_idx",
+                "kernel",
+                "C",
+                "gamma",
+                "train_accuracy",
+                "train_recall",
+                "test_accuracy",
+                "test_recall",
+            ])
+        for kernel in kernels:
+            for c in cs:
+                
+                if kernel == "linear":
 
-    print("Evaluating SVM")
+                    print(f"Training SVM | kernel={kernel}, C={c}")
 
-    # ---- Train metrics ----
-    train_preds = svm.predict(X_train)
-    train_acc = accuracy_score(y_train, train_preds)
-    train_recall = recall_score(y_train, train_preds, average="macro")
+                    svm = SVC(kernel="linear", C=c)
+                    svm.fit(X_train, y_train)
 
-    # ---- Test metrics ----
-    test_preds = svm.predict(X_test)
-    test_acc = accuracy_score(y_test, test_preds)
-    test_recall = recall_score(y_test, test_preds, average="macro")
+                    # Train metrics
+                    train_preds = svm.predict(X_train)
+                    train_acc = accuracy_score(y_train, train_preds)
+                    train_recall = recall_score(y_train, train_preds, average="macro")
 
-    print(f"SVM results using layer {layer_idx}:")
-    print(f"  Train Accuracy: {train_acc:.4f}")
-    print(f"  Train Recall:   {train_recall:.4f}")
-    print(f"  Test Accuracy:  {test_acc:.4f}")
-    print(f"  Test Recall:    {test_recall:.4f}")
+                    # Test metrics
+                    test_preds = svm.predict(X_test)
+                    test_acc = accuracy_score(y_test, test_preds)
+                    test_recall = recall_score(y_test, test_preds, average="macro")
+
+                    writer.writerow([
+                        model_name,
+                        i,
+                        kernel,
+                        c,
+                        None,
+                        train_acc,
+                        train_recall,
+                        test_acc,
+                        test_recall,
+                    ])
+
+                # -------------------------
+                # RBF kernel
+                # -------------------------
+                else:
+                    for g in gs:
+
+                        print(f"Training SVM | kernel={kernel}, C={c}, gamma={g}")
+
+                        svm = SVC(kernel="rbf", C=c, gamma=g)
+                        svm.fit(X_train, y_train)
+
+                        # Train metrics
+                        train_preds = svm.predict(X_train)
+                        train_acc = accuracy_score(y_train, train_preds)
+                        train_recall = recall_score(y_train, train_preds, average="macro")
+
+                        # Test metrics
+                        test_preds = svm.predict(X_test)
+                        test_acc = accuracy_score(y_test, test_preds)
+                        test_recall = recall_score(y_test, test_preds, average="macro")
+
+                        writer.writerow([
+                            model_name,
+                            i,
+                            kernel,
+                            c,
+                            g,
+                            train_acc,
+                            train_recall,
+                            test_acc,
+                            test_recall,
+                        ])
+            print(f"SVM results using layer {i}:")
+            print(f"  Train Accuracy: {train_acc:.4f}")
+            print(f"  Train Recall:   {train_recall:.4f}")
+            print(f"  Test Accuracy:  {test_acc:.4f}")
+            print(f"  Test Recall:    {test_recall:.4f}")
 
     return {
         "train_acc": train_acc,
@@ -118,42 +189,44 @@ def mlp_svm_experiment(model, train_loader, test_loader, device, layer_idx=-3):
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_name = '14122025_1414'
-    with open(WEEK_2_ROOT / "results" / f"{model_name}.json", "r") as f:
-        cfg = json.load(f)
-    augmentation = cfg[0]['config']['data_agmentation']
 
-    if augmentation:
-            train_transform = F.Compose([
-                F.ToImage(),
-                F.ToDtype(torch.float32, scale=True),
-                F.Resize((cfg[0]['config']['img_size'][0][0], cfg[0]['config']['img_size'][0][1])),
-                F.RandomHorizontalFlip(p=0.5),
-                F.ColorJitter(brightness=0.2, contrast=0.2),
-            ])
+    model_names = ["14122025_2152","14122025_2153","14122025_2219","14122025_2117","15122025_1133","15122025_1142","15122025_1208"]
+    for model_name in model_names:
+        with open(WEEK_2_ROOT / "results" / f"{model_name}.json", "r") as f:
+            cfg = json.load(f)
+        augmentation = cfg[0]['config']['data_agmentation']
 
-            test_transform = F.Compose([
-                F.ToImage(),
-                F.ToDtype(torch.float32, scale=True),
-                F.Resize((cfg[0]['config']['img_size'][0][0], cfg[0]['config']['img_size'][0][1])),
-            ])
-            data_train = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\train', transform=train_transform)
-            data_test = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\val', transform=test_transform)
-    else:
-            transformation  = F.Compose([
-                                        F.ToImage(),
-                                        F.ToDtype(torch.float32, scale=True),
-                                        F.Resize(size=(cfg[0]['config']['img_size'][0][0], cfg[0]['config']['img_size'][0][1])),
-                                    ])
+        if augmentation:
+                train_transform = F.Compose([
+                    F.ToImage(),
+                    F.ToDtype(torch.float32, scale=True),
+                    F.Resize((cfg[0]['config']['img_size'][0][0], cfg[0]['config']['img_size'][0][1])),
+                    F.RandomHorizontalFlip(p=0.5),
+                    F.ColorJitter(brightness=0.2, contrast=0.2),
+                ])
+
+                test_transform = F.Compose([
+                    F.ToImage(),
+                    F.ToDtype(torch.float32, scale=True),
+                    F.Resize((cfg[0]['config']['img_size'][0][0], cfg[0]['config']['img_size'][0][1])),
+                ])
+                data_train = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\train', transform=train_transform)
+                data_test = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\val', transform=test_transform)
+        else:
+                transformation  = F.Compose([
+                                            F.ToImage(),
+                                            F.ToDtype(torch.float32, scale=True),
+                                            F.Resize(size=(cfg[0]['config']['img_size'][0][0], cfg[0]['config']['img_size'][0][1])),
+                                        ])
+            
+                data_train = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\train', transform=transformation)
+                data_test = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\val', transform=transformation)    
+
+        train_loader = DataLoader(data_train, batch_size=256, pin_memory=True, shuffle=True, num_workers=8)
+        test_loader = DataLoader(data_test, batch_size=128, pin_memory=True, shuffle=False, num_workers=8)
         
-            data_train = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\train', transform=transformation)
-            data_test = ImageFolder(r'c:\Users\maiol\Desktop\Master\C3\places_reduced\val', transform=transformation)    
 
-    train_loader = DataLoader(data_train, batch_size=256, pin_memory=True, shuffle=True, num_workers=8)
-    test_loader = DataLoader(data_test, batch_size=128, pin_memory=True, shuffle=False, num_workers=8)
-    
+        model = reconstruct_best_model(train_loader, model_name, cfg)
+        #layer_to_use = -2 # use last hidden layer of the MLP
 
-    model = reconstruct_best_model(train_loader, model_name, cfg)
-    layer_to_use = -2 # use last hidden layer of the MLP
-
-    acc = mlp_svm_experiment(model, train_loader, test_loader, device, layer_idx=layer_to_use)
+        acc = mlp_svm_experiment(model, train_loader, test_loader, device, model_name)
