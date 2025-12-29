@@ -1,0 +1,37 @@
+paths:
+      dataset: "c:/Users/maiol/Desktop/Master/C3/MIT_small_train_1/"
+      models_out_path: "./models"
+      plots_out_path: "./plots"
+
+data_augm: False
+
+optimizer:
+      type: SGD
+      lr: 1e-3
+      weight_decay: 1e-4
+      momentum: 0.9
+      betas:
+        - - 0.9
+          - 0.999
+      nesterov: True
+
+scheduler:
+      type: "steplr" #StepLR, MultiStepLR, CosineAnnealingLR or None
+
+pipeline:
+      batch_size:
+          - 16
+          - 1
+      num_epochs: 20
+
+preset: "fc_only"
+
+#Choose one preset out of this:
+
+# FREEZE_PRESETS = {
+#     "fc_only":       {"stem": True,  "layer1": True,  "layer2": True,  "layer3": True,  "layer4": True,  "fc": False},
+#     "l4_fc":         {"stem": True,  "layer1": True,  "layer2": True,  "layer3": True,  "layer4": False, "fc": False},
+#     "l3_l4_fc":      {"stem": True,  "layer1": True,  "layer2": True,  "layer3": False, "layer4": False, "fc": False},
+#     "l2_l3_l4_fc":   {"stem": True,  "layer1": True,  "layer2": False, "layer3": False, "layer4": False, "fc": False},
+#     "none_frozen":   {"stem": False, "layer1": False, "layer2": False, "layer3": False, "layer4": False, "fc": False},
+#     }

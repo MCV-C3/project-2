@@ -1,18 +1,35 @@
+import argparse
+import os
+from datetime import datetime
+from pathlib import Path
 from typing import *
-from torch.utils.data import DataLoader
-from torchvision.datasets import ImageFolder
+
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
-import matplotlib.pyplot as plt
-from models import SimpleModel, WraperModel
-import torchvision.transforms.v2  as F
-from torchviz import make_dot
+import torchvision.transforms.v2 as F
 import tqdm
+import yaml
+from models import ResNet50, SimpleModel, WraperModel
+from torch.utils.data import DataLoader
+from torchvision.datasets import ImageFolder
+from torchvision.transforms import (Compose, Normalize, RandomHorizontalFlip,
+                                    RandomResizedCrop, ToTensor)
+from torchviz import make_dot
+from utils import (apply_freeze_preset, make_data_loaders, make_optimizer,
+                   make_scheduler)
 
-from torchvision.transforms import Compose, ToTensor, Normalize, RandomHorizontalFlip, RandomResizedCrop
+import wandb
 
+FREEZE_PRESETS = {
+"fc_only":       {"stem": True,  "layer1": True,  "layer2": True,  "layer3": True,  "layer4": True,  "fc": False},
+"l4_fc":         {"stem": True,  "layer1": True,  "layer2": True,  "layer3": True,  "layer4": False, "fc": False},
+"l3_l4_fc":      {"stem": True,  "layer1": True,  "layer2": True,  "layer3": False, "layer4": False, "fc": False},
+"l2_l3_l4_fc":   {"stem": True,  "layer1": True,  "layer2": False, "layer3": False, "layer4": False, "fc": False},
+"none_frozen":   {"stem": False, "layer1": False, "layer2": False, "layer3": False, "layer4": False, "fc": False},
+}
 
 # Train function
 def train(model, dataloader, criterion, optimizer, device):
@@ -66,7 +83,7 @@ def test(model, dataloader, criterion, device):
     accuracy = correct / total
     return avg_loss, accuracy
 
-def plot_metrics(train_metrics: Dict, test_metrics: Dict, metric_name: str):
+def plot_metrics(train_metrics: Dict, test_metrics: Dict, metric_name: str, file_str: str, plots_dir: str):
     """
     Plots and saves metrics for training and testing.
 
@@ -89,23 +106,13 @@ def plot_metrics(train_metrics: Dict, test_metrics: Dict, metric_name: str):
     plt.grid(True)
 
     # Save the plot with the appropriate name
-    filename = "loss.png" if metric_name.lower() == "loss" else "metrics.png"
+    out_dir = Path(plots_dir) / ("losses" if metric_name.lower() == "loss" else "metrics")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    filename = out_dir / f"{file_str}.png"
     plt.savefig(filename)
     print(f"Plot saved as {filename}")
 
     plt.close()  # Close the figure to free memory
-
-# Data augmentation example
-def get_data_transforms():
-    """
-    Returns a Compose object with data augmentation transformations.
-    """
-    return Compose([
-        RandomResizedCrop(size=224),
-        RandomHorizontalFlip(),
-        ToTensor(),
-        Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
 
 def plot_computational_graph(model: torch.nn.Module, input_size: tuple, filename: str = "computational_graph"):
     """
@@ -126,38 +133,101 @@ def plot_computational_graph(model: torch.nn.Module, input_size: tuple, filename
 
     print(f"Computational graph saved as {filename}")
 
+def parse_args():
+    """
+    Parse command-line arguments for the neural network training script.
+
+    This function defines and parses command-line options required to run
+    the training pipeline. Currently, it supports specifying the path to
+    a YAML configuration file.
+
+    Returns
+    -------
+    argparse.Namespace
+        Parsed command-line arguments. The returned namespace contains:
+
+        config_path : str
+            Path to the YAML configuration file used to configure the training
+            run. Defaults to ``configs/config_NN.yaml``.
+    """
+    parser = argparse.ArgumentParser(description="Train ResNet50 with YAML config.")
+    parser.add_argument(
+        "--config_path",
+        type=str,
+        default=str(Path("configs") / "config_NN.yaml"),
+        help="Path to YAML config file (default: configs\\config1.yaml).",
+    )
+    return parser.parse_args()
 
 if __name__ == "__main__":
+    #Parse config
+    args = parse_args()
+
+    config_path = Path(args.config_path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path.resolve()}")
+
+    #Organize parsed config
+    with config_path.open("r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+        optimizer_cfg = cfg['optimizer']
+        augmentation = cfg['data_augm']
+        freeze_preset_name = cfg["preset"]
+        pipeline_cfg = cfg["pipeline"]
+        scheduler_cfg = cfg["scheduler"]
+        paths = cfg['paths']
 
     torch.manual_seed(42)
+    timestamp = datetime.now().strftime("%d%m%Y_%H%M")
 
-    transformation  = F.Compose([
-                                    F.ToImage(),
-                                    F.ToDtype(torch.float32, scale=True),
-                                    F.Resize(size=(224, 224)),
-                                ])
-    
-    data_train = ImageFolder("~/data/Master/MIT_split/train", transform=transformation)
-    data_test = ImageFolder("~/data/Master/MIT_split/test", transform=transformation) 
-
-    train_loader = DataLoader(data_train, batch_size=16, pin_memory=True, shuffle=True, num_workers=8)
-    test_loader = DataLoader(data_test, batch_size=1, pin_memory=True, shuffle=False, num_workers=8)
-
-    C, H, W = np.array(data_train[0][0]).shape
+    #Create loaders
+    train_loader, test_loader = make_data_loaders(paths['dataset'], augmentation, pipeline_cfg["batch_size"])
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print('Device used', device)
 
+    num_epochs = pipeline_cfg["num_epochs"]
 
-    model = WraperModel(num_classes=8, feature_extraction=True)#SimpleModel(input_d=C*H*W, hidden_d=300, output_d=8)
-
+    #Create model and freeze
+    model = ResNet50(num_classes=8, feature_extraction=False)
+    preset = FREEZE_PRESETS[freeze_preset_name]
     model = model.to(device)
+    apply_freeze_preset(model.backbone, preset, freeze_bn_stats=True)
+
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    num_epochs = 3
+    optimizer = make_optimizer(
+        model,
+        optimizer_type=str(optimizer_cfg["type"]),
+        lr=float(optimizer_cfg["lr"]),
+        wd=float(optimizer_cfg["weight_decay"]),
+        momentum=float(optimizer_cfg["momentum"]),
+        nesterov=bool(optimizer_cfg["nesterov"]),
+    )
+    scheduler = make_scheduler(optimizer, scheduler_cfg["type"], num_epochs=num_epochs)
+    
 
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
     
+    wandb_run = wandb.init(
+        project="week3-ResNet",
+        name=f"{timestamp}-{freeze_preset_name}",
+        group="grid-search",
+        reinit=True,
+        config={
+            "freeze_preset": freeze_preset_name,
+            **preset,
+            "lr": float(optimizer_cfg['lr']),
+            "weight_decay": float(optimizer_cfg['weight_decay']),
+            "momentum": float(optimizer_cfg['momentum']),
+            "optimizer": optimizer_cfg['type'],
+            "batch_size": train_loader.batch_size,
+            "epochs": num_epochs,
+            "data_augm": augmentation,
+            "scheduler": scheduler_cfg["type"]
+        }
+    )
+
     for epoch in tqdm.tqdm(range(num_epochs), desc="TRAINING THE MODEL"):
         train_loss, train_accuracy = train(model, train_loader, criterion, optimizer, device)
         test_loss, test_accuracy = test(model, test_loader, criterion, device)
@@ -167,12 +237,27 @@ if __name__ == "__main__":
         test_losses.append(test_loss)
         test_accuracies.append(test_accuracy)
 
+        wandb.log({
+            "epoch": epoch + 1,
+            "train/loss": train_loss,
+            "train/accuracy": train_accuracy,
+            "test/loss": test_loss,
+            "test/accuracy": test_accuracy
+        })
         print(f"Epoch {epoch + 1}/{num_epochs} - "
               f"Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}, "
               f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
         
-    torch.save(model.state_dict(), "./saved_model.pt")
+        if scheduler is not None:
+            scheduler.step()
+    wandb.finish()
 
     # Plot results
-    plot_metrics({"loss": train_losses, "accuracy": train_accuracies}, {"loss": test_losses, "accuracy": test_accuracies}, "loss")
-    plot_metrics({"loss": train_losses, "accuracy": train_accuracies}, {"loss": test_losses, "accuracy": test_accuracies}, "accuracy")
+    plot_metrics({"loss": train_losses, "accuracy": train_accuracies}, {"loss": test_losses, "accuracy": test_accuracies}, 
+                 "loss", f"{timestamp}_{freeze_preset_name}", paths["plots_out_path"])
+    plot_metrics({"loss": train_losses, "accuracy": train_accuracies}, {"loss": test_losses, "accuracy": test_accuracies}, 
+                 "accuracy", f"{timestamp}_{freeze_preset_name}", paths["plots_out_path"])
+
+    save_dir = Path(paths["models_out_path"])
+    save_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), save_dir / f"{timestamp}_{freeze_preset_name}.pth")

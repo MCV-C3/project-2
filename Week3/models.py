@@ -164,6 +164,108 @@ class WraperModel(nn.Module):
         return grayscale_cam
 
 
+class ResNet50(nn.Module):
+    def __init__(self, num_classes: int, feature_extraction: bool = True):
+        super().__init__()
+
+        # Load pretrained ResNet50
+        self.backbone = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+
+        if feature_extraction:
+            self.set_parameter_requires_grad(feature_extracting=True)
+
+        # Replace classification head (ResNet uses .fc)
+        in_features = self.backbone.fc.in_features
+        self.backbone.fc = nn.Linear(in_features, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.backbone(x)
+
+    def set_parameter_requires_grad(self, feature_extracting: bool):
+        if feature_extracting:
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+
+    # ------------------------------------------------------------
+    # Feature maps: ResNet doesn't have backbone.features like VGG.
+    # We'll extract outputs of conv layers (Conv2d) in forward order.
+    # NOTE: This is *not* "layer-by-layer sequential application"
+    # like you did with VGG (because ResNet has skip connections).
+    # We'll do it via forward hooks instead (correct for ResNet).
+    # ------------------------------------------------------------
+    def extract_feature_maps(self, input_image: torch.Tensor):
+        feature_maps = []
+        layer_names = []
+        hooks = []
+
+        def save_activation(name):
+            def hook(module, inp, out):
+                feature_maps.append(out)
+                layer_names.append(name)
+            return hook
+
+        # Register hooks on Conv2d modules
+        for name, module in self.backbone.named_modules():
+            if isinstance(module, nn.Conv2d):
+                hooks.append(module.register_forward_hook(save_activation(name)))
+
+        # Forward pass
+        _ = self.forward(input_image)
+
+        # Remove hooks
+        for h in hooks:
+            h.remove()
+
+        print("TOTAL CONV LAYERS:", len(layer_names))
+        return feature_maps, layer_names
+
+    # ------------------------------------------------------------
+    # Extract features from specific named modules using hooks.
+    # For ResNet50, useful layer names include:
+    #   "conv1", "layer1", "layer2", "layer3", "layer4",
+    #   "layer4.2.conv3", "layer4.2" etc.
+    # ------------------------------------------------------------
+    def extract_features_from_hooks(self, x: torch.Tensor, layers: List[str]) -> Dict[str, torch.Tensor]:
+        outputs = {}
+        hooks = []
+
+        name_to_module = dict(self.backbone.named_modules())
+
+        def get_activation(name):
+            def hook(module, inp, out):
+                outputs[name] = out
+            return hook
+
+        for layer_name in layers:
+            if layer_name not in name_to_module:
+                raise KeyError(
+                    f"Layer '{layer_name}' not found. Example layers: "
+                    f"conv1, layer1, layer2, layer3, layer4, layer4.2.conv3"
+                )
+            hooks.append(name_to_module[layer_name].register_forward_hook(get_activation(layer_name)))
+
+        _ = self.forward(x)
+
+        for h in hooks:
+            h.remove()
+
+        return outputs
+
+    # ------------------------------------------------------------
+    # Grad-CAM
+    # target_layer should be a list of MODULES, not names.
+    # Common choice for ResNet50: [model.backbone.layer4[-1]]
+    # or [model.backbone.layer4[-1].conv3]
+    # ------------------------------------------------------------
+    def extract_grad_cam(
+        self,
+        input_image: torch.Tensor,
+        target_layer: List[nn.Module],
+        targets: List[ClassifierOutputTarget],
+    ):
+        with GradCAMPlusPlus(model=self.backbone, target_layers=target_layer) as cam:
+            grayscale_cam = cam(input_tensor=input_image, targets=targets)[0, :]
+        return grayscale_cam
 
 
 
