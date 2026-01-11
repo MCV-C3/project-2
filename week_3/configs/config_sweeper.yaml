@@ -1,0 +1,49 @@
+method: random
+metric:
+  name: test/accuracy
+  goal: maximize
+
+program: main.py
+command:
+  - ${env}
+  - C:\Users\maiol\Desktop\Master\C1\C1_venv\Scripts\python.exe
+  - ${program}
+  - --config_path
+  - configs/config_NN.yaml
+  - --wandb
+
+parameters:
+  freeze_preset:
+    values: [fc_only, l4_fc, l3_l4_fc, l2_l3_l4_fc, none_frozen]
+
+  optimizer:
+    values: [SGD]
+
+  lr:
+    distribution: log_uniform_values
+    min: 1e-5
+    max: 3e-3
+
+  weight_decay:
+    distribution: log_uniform_values
+    min: 1e-6
+    max: 3e-4
+
+  momentum:
+    distribution: uniform
+    min: 0.7
+    max: 0.99
+
+  batch_size:
+    values: [[8,8], [16,16], [32,32]]
+
+  nesterov:
+    values: [true, false]
+
+  epochs:
+    distribution: int_uniform
+    min: 15
+    max: 40
+
+  data_augm: 
+    values: [true, false]

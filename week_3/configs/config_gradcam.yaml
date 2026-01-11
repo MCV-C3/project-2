@@ -1,0 +1,16 @@
+paths:
+  model_path: ./models/29122025_1724_fc_only.pth
+  test_path: "C:/Users/xavipba/OneDrive/Escritorio/Msc Computer vision/C3 Projects/week_3/MIT_small_train_1/test"
+  output_path: ./plots/gradcam
+  image_paths:
+      - "C:/Users/xavipba/OneDrive/Escritorio/Msc Computer vision/C3 Projects/week_3/MIT_small_train_1/test/highway/a866042.jpg"
+      # - Add as much as you want, important that the path must contain the gt class (/gt/image_name.jpg)
+
+gradcam:
+  target_layers:
+    - layer4.2           # == model.backbone.layer4[-1], In ResNet50 has 4 blocks, the 4th has 3 layers indexed 
+                         # as (0,1,2), so last layer of the last block
+    
+    # - layer4.2.conv3    # alternative
+
+data_augm: False    #Set it as it was in the training process, if u don't remember check w&b, it should be there.
