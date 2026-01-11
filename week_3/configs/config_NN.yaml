@@ -1,53 +1,24 @@
-program: python
-command:
-  - ${env}
-  - ${program}
-  - main.py
-  - "--wandb"
-  - "--config_path"
-  - "config_NN.yaml"
+paths:
+  dataset: /kaggle/input/mit-1-small/MIT_small_train_1
+  models_out_path: ./models
+  plots_out_path: ./plots
 
-method: random
-metric:
-  name: test/accuracy
-  goal: maximize
+data_augm: true
+preset: none_frozen
 
 
-parameters:
-  freeze_preset:
-    values: [none_frozen]
+optimizer:
+  type: SGD
+  lr: 1e-3
+  weight_decay: 1e-4
+  momentum: 0.4
+  nesterov: false
 
-  scheduler:
-    values: ["steplr", "multisteplr", "cosine", "onecycle", "plateau", "none"]
+scheduler:
+  type: steplr
+  step_size: 7
+  gamma: 0.1
 
-  optimizer:
-    values: ["SGD","Adam","AdamW","RMSprop","Adagrad","Adadelta"]
-
-  lr:
-    distribution: log_uniform_values
-    min: 1e-5
-    max: 3e-4
-
-  weight_decay:
-    distribution: log_uniform_values
-    min: 1e-6
-    max: 3e-4
-
-  momentum:
-    distribution: uniform
-    min: 0.7
-    max: 0.99
-
-  batch_size:
-    values: [[16,16], [32,32]]
-
-  nesterov:
-    values: [true, false]
-
-  epochs:
-    distribution: int_uniform
-    min: 10
-    max: 30
-
-  data_augm: 
-    values: [true]
+pipeline:
+  batch_size: [16, 1]
+  num_epochs: 20
