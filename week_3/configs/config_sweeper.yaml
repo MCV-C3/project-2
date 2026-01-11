@@ -1,0 +1,53 @@
+program: python
+command:
+  - ${env}
+  - ${program}
+  - main.py
+  - "--wandb"
+  - "--config_path"
+  - "config_NN.yaml"
+
+method: random
+metric:
+  name: test/accuracy
+  goal: maximize
+
+
+parameters:
+  freeze_preset:
+    values: [none_frozen]
+
+  scheduler:
+    values: ["steplr", "multisteplr", "cosine", "onecycle", "plateau", "none"]
+
+  optimizer:
+    values: ["SGD","Adam","AdamW","RMSprop","Adagrad","Adadelta"]
+
+  lr:
+    distribution: log_uniform_values
+    min: 1e-5
+    max: 3e-4
+
+  weight_decay:
+    distribution: log_uniform_values
+    min: 1e-6
+    max: 3e-4
+
+  momentum:
+    distribution: uniform
+    min: 0.7
+    max: 0.99
+
+  batch_size:
+    values: [[16,16], [32,32]]
+
+  nesterov:
+    values: [true, false]
+
+  epochs:
+    distribution: int_uniform
+    min: 10
+    max: 30
+
+  data_augm: 
+    values: [true]
