@@ -1,0 +1,13 @@
+#!/bin/bash
+#SBATCH --job-name=repvgg
+#SBATCH -n 4
+#SBATCH --mem=16000
+#SBATCH -p mlow
+#SBATCH --gres=gpu:1
+#SBATCH -o %x_%u_%j.out
+#SBATCH -e %x_%u_%j.err
+
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate c3
+
+python Week4/main.py
