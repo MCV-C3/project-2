@@ -33,3 +33,8 @@ Thumbs.db
 # ---- Project-specific ----
 data/
 Week1/cache
+wandb
+*/models
+
+# ----- Secrets -----
+.env

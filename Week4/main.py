@@ -33,7 +33,8 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 def main(dataset_path, num_classes, epochs=50, lr=1e-3, weight_decay=1e-4, batch_size=(64, 128), augmentation=True):
     run = wandb.init(
-        project="repvgg-from-scratch",
+        project="Week4-Oriol",
+        entity="xavipba-universitat-aut-noma-de-barcelona",
         config={
             "epochs": epochs,
             "lr": lr,
