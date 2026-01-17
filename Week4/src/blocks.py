@@ -98,7 +98,8 @@ class RepBlock(nn.Module):
 
         self.rbr_reparam = nn.Conv2d(
             self.in_ch, self.out_ch, kernel_size=3, stride=self.stride, padding=1, bias=True
-        )
+        ).to(W.device)
+        
         self.rbr_reparam.weight.data.copy_(W)
         self.rbr_reparam.bias.data.copy_(b)
 

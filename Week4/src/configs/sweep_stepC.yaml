@@ -1,0 +1,48 @@
+program: Week4/main.py
+name: SweepC
+project: Week4-Oriol
+entity: xavipba-universitat-aut-noma-de-barcelona
+
+method: bayes
+metric:
+  name: val_acc
+  goal: maximize
+
+early_terminate:
+  type: hyperband
+  min_iter: 15
+  eta: 2
+
+parameters:
+  # Lock best arch + recipe (replace with winners)
+  arch:
+    value: "deeper"
+  epochs:
+    value: 70
+
+  train_pipeline:
+    value: "randaug_erasing"
+  label_smoothing:
+    value: 0.1
+  mix_policy:
+    value: "mixup"
+  mixup_alpha:
+    values: [0.1, 0.2, 0.4]
+
+  optimizer:
+    value: "adamw"
+  scheduler:
+    value: "cosine"
+
+  # Local search band (tight)
+  lr:
+    values: [0.0005, 0.001, 0.002]
+  weight_decay:
+    values: [0.00005, 0.0001, 0.0002, 0.0005]
+
+  momentum:
+    value: 0.9
+  batch_train:
+    value: 64
+  batch_test:
+    value: 128

@@ -10,4 +10,4 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate c3
 
-python Week4/main.py
+wandb agent xavipba-universitat-aut-noma-de-barcelona/Week4-Oriol/yfcnbyss

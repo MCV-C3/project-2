@@ -1,0 +1,40 @@
+program: Week4/main.py
+name: SweepB
+project: Week4-Oriol
+entity: xavipba-universitat-aut-noma-de-barcelona
+
+method: grid
+metric:
+  name: val_acc
+  goal: maximize
+
+parameters:
+  arch:
+    values: ["tiny", "base", "deeper", "wider"]
+
+  epochs:
+    value: 70
+  train_pipeline:
+    value: "randaug"
+  label_smoothing:
+    value: 0.1
+  mix_policy:
+    value: "mixup"
+  mixup_alpha:
+    value: 0.4
+
+  optimizer:
+    value: "adamw"
+  scheduler:
+    value: "none"
+  lr:
+    value: 0.001
+  weight_decay:
+    value: 0.0005
+
+  momentum:
+    value: 0.9
+  batch_train:
+    value: 64
+  batch_test:
+    value: 128

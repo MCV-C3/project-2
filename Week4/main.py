@@ -9,59 +9,81 @@ import wandb
 
 from src.model import RepNet, switch_model_to_deploy
 from src.train import train, evaluate
-from src.utils import check_equivalence, make_data_loaders
+from src.utils import check_equivalence, make_data_loaders, build_optimizer, build_scheduler
+from src.configs.architectures import ARCHS
 
 
-cfg = {
-    "stem_ch": 64,
-    "stages": [
-        (64,  2, False),
-        (128, 2, True),
-        (256, 2, True),
-        (512, 1, True),
-    ]
-}
 
-NUM_CLASSES = 8 
-EPOCHS = 30
-LR = 1e-3
-WEIGHT_DECAY = 1e-4
-BATCH_SIZE = (64, 128)
-USE_AUGMENTATION = True
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+def main(dataset_path):
+    NUM_CLASSES = 8 
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-
-def main(dataset_path, num_classes, epochs=50, lr=1e-3, weight_decay=1e-4, batch_size=(64, 128), augmentation=True):
     run = wandb.init(
         project="Week4-Oriol",
         entity="xavipba-universitat-aut-noma-de-barcelona",
         config={
-            "epochs": epochs,
-            "lr": lr,
-            "weight_decay": weight_decay,
-            "batch_size": batch_size,
-            "architecture": cfg,
-        },
+            "arch": "base",
+            "epochs": 40,
+            "train_pipeline": "basic",  # plain | basic | basic_erasing | randaug | randaug_erasing
+            "label_smoothing": 0.0,
+            "mix_policy": "none",  # none | mixup
+            "mixup_alpha": 0.2,    # used only if mix_policy == "mixup"
+            "optimizer": "adamw",
+            "scheduler": "cosine",
+            "lr": 1e-3,
+            "weight_decay": 1e-4,
+            "momentum": 0.9,
+            "batch_train": 64,
+            "batch_test": 128,
+    }
+        )
+
+    wandb.run.name = (
+        f"{wandb.config.arch}"
+        f"_{wandb.config.train_pipeline}"
+        f"_mix-{wandb.config.mix_policy}{wandb.config.mixup_alpha if wandb.config.mix_policy=='mixup' else ''}"
+        f"_ls-{wandb.config.label_smoothing}"
+        f"_{wandb.config.optimizer}"
+        f"_{wandb.config.scheduler}"
+        f"_lr-{wandb.config.lr}"
+        f"_wd-{wandb.config.weight_decay}"
     )
 
-    train_loader, test_loader = make_data_loaders(dataset_path, augmentation=augmentation, batch_size=batch_size)
+    cfg = ARCHS[wandb.config.arch]
+    train_loader, test_loader = make_data_loaders(
+        dataset_path,
+        batch_size=(wandb.config.batch_train, wandb.config.batch_test),
+        train_pipeline=wandb.config.train_pipeline,
+    )
 
-    model = RepNet(num_classes=num_classes, cfg=cfg).to(DEVICE)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    model = RepNet(num_classes=NUM_CLASSES, cfg=cfg).to(DEVICE)
+    criterion = nn.CrossEntropyLoss(label_smoothing=wandb.config.label_smoothing)
+    optimizer = build_optimizer(
+        wandb.config.optimizer,
+        model.parameters(),
+        lr=wandb.config.lr,
+        weight_decay=wandb.config.weight_decay,
+        momentum=wandb.config.momentum,
+    )
+    
+    scheduler = build_scheduler(wandb.config.scheduler, optimizer, epochs=wandb.config.epochs)
 
     best_state, best_val_acc, best_val_loss = train(
         model=model,
         train_loader=train_loader,
-        val_loader=test_loader,
+        test_loader=test_loader,
         device=DEVICE,
         optimizer=optimizer,
         criterion=criterion,
-        epochs=epochs,
+        epochs=wandb.config.epochs,
         wandb_run=run,
+        scheduler=scheduler,
+        mix_policy=wandb.config.mix_policy,
+        mixup_alpha=wandb.config.mixup_alpha,
     )
 
     model.load_state_dict(best_state)
+    model = model.to(DEVICE)
     model.eval()
     run.log({"best_val_loss": best_val_loss, "best_val_acc": best_val_acc})
 
@@ -70,7 +92,7 @@ def main(dataset_path, num_classes, epochs=50, lr=1e-3, weight_decay=1e-4, batch
     torch.save(best_state, model_save_path / "repnet_train.pth")
     
 
-    check_equivalence(model,device=DEVICE, input_shape=(8, 3, 224, 224))
+    check_equivalence(model, device=DEVICE, input_shape=(8, 3, 224, 224))
 
 
     # Deploy conversion + save
@@ -85,12 +107,4 @@ def main(dataset_path, num_classes, epochs=50, lr=1e-3, weight_decay=1e-4, batch
 
 
 if __name__ == "__main__":
-    main(
-        dataset_path="~/mcv/datasets/C3/2425/MIT_small_train_1",
-        num_classes=NUM_CLASSES,
-        epochs=EPOCHS,
-        lr=LR,
-        weight_decay=WEIGHT_DECAY,
-        batch_size=BATCH_SIZE,
-        augmentation=USE_AUGMENTATION,
-    )
+    main(dataset_path="~/mcv/datasets/C3/2425/MIT_small_train_1")
